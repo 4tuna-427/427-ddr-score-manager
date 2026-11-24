@@ -76,6 +76,15 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes+shock を比較（charts が無い/notes が無い場合は 'no_master'）。不一致は needs_review=1。
 - レスポンス 201: `{score: <scores行>, previous: {score, ex_score, diff, played_at} | null}`（previous は同一 chart の直前レコード）
 
+### GET /api/browse?q=&style=&difficulty=&level=&version=&played=&sort=&limit=&offset=
+→ 譜面ブラウズ。マスタ全譜面に自己ベスト集計を結合して返す `{items, total}`。
+- 絞り込み: `q`（曲名の正規化部分一致 or アーティスト部分一致）、`style` SP/DP、`difficulty`、`level`（完全一致）、`version`（完全一致）、`played` = played|unplayed
+- `sort`: level（既定）| title | best（ベストスコア降順、未プレイは最後）| recent（最終プレイ降順、未プレイは最後）
+- 各 item: 譜面・曲情報＋ `best_score` / `plays` / `last_played`、ベスト記録の `best_ex_score` / `best_rank` / `best_lamp`
+
+### GET /api/browse/facets
+→ `{versions: [...]}`（songs に存在するバージョン一覧、絞り込みUI用）
+
 ### GET /api/summary/latest-day
 → 直近のプレイ日（JST基準）のサマリ `{date, total_plays, unique_charts, updates}`。`updates` はその日に自己ベストを更新した譜面（同日複数プレイは最良のみ）で、各要素はスコア行＋ `prev_best`（その日より前の自己ベスト）/ `diff` / `is_new`（初プレイ）。スコアが無い場合は `date: null`。
 ※ スコア行には `chart_max_ex`（譜面の最大EXスコア）が付く（scores 一覧・詳細・export・summary 共通）。EX達成率は `ex_score / chart_max_ex` でクライアントが算出する。

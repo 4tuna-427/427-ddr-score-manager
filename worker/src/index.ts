@@ -485,6 +485,89 @@ app.get("/api/songs", async (c) => {
   return c.json({ items });
 });
 
+// ---- browse charts (master + personal bests) ----
+app.get("/api/browse/facets", async (c) => {
+  const { results } = await c.env.DB
+    .prepare("SELECT DISTINCT version FROM songs WHERE version IS NOT NULL AND version <> '' ORDER BY version")
+    .all<{ version: string }>();
+  return c.json({ versions: results.map((r) => r.version) });
+});
+
+app.get("/api/browse", async (c) => {
+  const q = c.req.query("q")?.trim() ?? "";
+  const style = c.req.query("style") ?? "";
+  const difficulty = c.req.query("difficulty") ?? "";
+  const levelRaw = parseInt(c.req.query("level") ?? "", 10);
+  const level = Number.isNaN(levelRaw) ? null : levelRaw;
+  const version = c.req.query("version") ?? "";
+  const played = c.req.query("played") ?? "";
+  const sort = c.req.query("sort") ?? "level";
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "50", 10) || 50, 1), 200);
+  const offset = Math.max(parseInt(c.req.query("offset") ?? "0", 10) || 0, 0);
+
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (q) {
+    where.push("(s.title_normalized LIKE ? OR s.artist LIKE ?)");
+    binds.push(`%${normalizeTitle(q)}%`, `%${q}%`);
+  }
+  if (style === "SP" || style === "DP") { where.push("c.play_style = ?"); binds.push(style); }
+  if (difficulty) { where.push("c.difficulty = ?"); binds.push(difficulty); }
+  if (level != null) { where.push("c.level = ?"); binds.push(level); }
+  if (version) { where.push("s.version = ?"); binds.push(version); }
+  if (played === "played") where.push("pb.plays IS NOT NULL");
+  if (played === "unplayed") where.push("pb.plays IS NULL");
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const fromSql = `FROM charts c JOIN songs s ON s.song_id = c.song_id
+    LEFT JOIN (SELECT chart_id, MAX(score) AS best_score, COUNT(*) AS plays, MAX(played_at) AS last_played
+               FROM scores GROUP BY chart_id) pb ON pb.chart_id = c.chart_id`;
+
+  const totalRow = await c.env.DB
+    .prepare(`SELECT COUNT(*) AS n ${fromSql} ${whereSql}`)
+    .bind(...binds)
+    .first<{ n: number }>();
+
+  const orderSql =
+    sort === "best" ? "ORDER BY pb.best_score IS NULL, pb.best_score DESC, s.title" :
+    sort === "recent" ? "ORDER BY pb.last_played IS NULL, pb.last_played DESC, s.title" :
+    sort === "title" ? "ORDER BY s.title, c.play_style, c.level" :
+    "ORDER BY c.level, s.title, c.play_style";
+  const { results: rows } = await c.env.DB
+    .prepare(
+      `SELECT c.chart_id, c.song_id, c.play_style, c.difficulty, c.level, c.max_ex,
+              s.title, s.artist, s.version, s.bpm,
+              pb.best_score, pb.plays, pb.last_played
+       ${fromSql} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
+    )
+    .bind(...binds, limit, offset)
+    .all<Record<string, unknown> & { chart_id: string; best_score: number | null }>();
+
+  // Rank/lamp/EX of the personal-best play (latest row achieving the best score).
+  const ids = rows.filter((r) => r.best_score != null).map((r) => r.chart_id);
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => "?").join(", ");
+    const { results: bestRows } = await c.env.DB
+      .prepare(
+        `SELECT chart_id, ex_score, rank, clear_lamp FROM scores
+         WHERE chart_id IN (${placeholders}) ORDER BY score DESC, played_at DESC`,
+      )
+      .bind(...ids)
+      .all<{ chart_id: string; ex_score: number | null; rank: string | null; clear_lamp: string | null }>();
+    const picked = new Set<string>();
+    const detail = new Map<string, { ex_score: number | null; rank: string | null; clear_lamp: string | null }>();
+    for (const br of bestRows) {
+      if (picked.has(br.chart_id)) continue;
+      picked.add(br.chart_id);
+      detail.set(br.chart_id, { ex_score: br.ex_score, rank: br.rank, clear_lamp: br.clear_lamp });
+    }
+    for (const r of rows) {
+      const d = detail.get(r.chart_id);
+      if (d) Object.assign(r, { best_ex_score: d.ex_score, best_rank: d.rank, best_lamp: d.clear_lamp });
+    }
+  }
+  return c.json({ items: rows, total: totalRow?.n ?? 0 });
+});
+
 // ---- GET /api/charts/:chart_id/history ----
 app.get("/api/charts/:chart_id/history", async (c) => {
   const chartId = c.req.param("chart_id");

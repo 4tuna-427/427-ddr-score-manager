@@ -179,6 +179,46 @@ export interface LatestDaySummary {
   updates: DayUpdate[]
 }
 
+export interface BrowseItem {
+  chart_id: string
+  song_id: string
+  play_style: string
+  difficulty: string
+  level: number | null
+  max_ex: number | null
+  title: string
+  artist: string | null
+  version: string | null
+  bpm: string | null
+  best_score: number | null
+  plays: number | null
+  last_played: number | null
+  best_ex_score?: number | null
+  best_rank?: string | null
+  best_lamp?: string | null
+}
+
+export function browseCharts(params: {
+  q?: string; style?: string; difficulty?: string; level?: number
+  version?: string; played?: string; sort?: string; limit?: number; offset?: number
+}): Promise<{ items: BrowseItem[]; total: number }> {
+  const qs = new URLSearchParams()
+  if (params.q) qs.set('q', params.q)
+  if (params.style) qs.set('style', params.style)
+  if (params.difficulty) qs.set('difficulty', params.difficulty)
+  if (params.level != null) qs.set('level', String(params.level))
+  if (params.version) qs.set('version', params.version)
+  if (params.played) qs.set('played', params.played)
+  if (params.sort) qs.set('sort', params.sort)
+  qs.set('limit', String(params.limit ?? 50))
+  qs.set('offset', String(params.offset ?? 0))
+  return request(`/api/browse?${qs.toString()}`)
+}
+
+export function getBrowseFacets(): Promise<{ versions: string[] }> {
+  return request('/api/browse/facets')
+}
+
 export function getLatestDaySummary(): Promise<LatestDaySummary> {
   return request('/api/summary/latest-day')
 }
