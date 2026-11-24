@@ -89,10 +89,11 @@ cd ../worker && npx wrangler pages deploy ../web/dist --project-name ddr-score-m
 3. 試しにリザルト写真を1枚アップロードし、登録結果カードが出ること・履歴に残ることを確認
 
 ## 7. マスタの更新
-- 楽曲マスタの定期更新は API の同期エンドポイントで可能:
+- **自動同期（通常はこちら）**: Worker の Cron Trigger が毎日 04:00 JST（データパイプラインの 03:00 更新の1時間後）に配信中の v1 songs.json を取得し、差分があった曲・譜面だけを取り込む。Worker をデプロイすればトリガーも一緒に登録される。実行結果は Cloudflare ダッシュボードの Worker → Logs で `[cron sync]` を検索すると確認できる（失敗時は `[cron sync] failed:`）。
+- 手動同期（フォールバック）も従来どおり可能:
   `curl -X POST -H "X-API-Token: <API_TOKEN>" https://<workers-url>/api/admin/sync -d '{}'`
-  既定では配信中の v1 songs.json を取得し、レベル・曲名を最新化する（ノーツ数は保持される）。
-- ノーツ数つきの最新シードが必要になったら、`scripts/make_seed.py` に最新の songs_v2.json を渡して再生成し、手順2の分割投入を再実行する。
+  レスポンスの `songWrites` / `chartWrites` が実際に更新された行数（0 なら変更なし）。
+- 注意: v1 songs.json はノーツ数を持たないため、新曲の譜面は notes が空のまま取り込まれる（判定合計チェックと EX 率表示はその譜面では効かない。レベル・曲名・アーティスト・削除曲の tombstone は自動で最新化される）。ノーツ数つきの最新シードが必要になったら、`scripts/make_seed.py` に最新の songs_v2.json を渡して再生成し、手順2の分割投入を再実行する。
 
 ## 注意・既知の制限
 - Share Target は Android Chrome で PWA をインストールした場合のみ共有メニューに出る。ホーム画面ショートカットだけでは出ない

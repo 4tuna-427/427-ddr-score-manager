@@ -310,6 +310,48 @@ return { songs, charts};
 }
 
 /**
+ * Diff the expanded master against the current DB rows so a sync only
+ * writes what actually changed. This keeps the daily cron sync near-zero
+ * writes (D1 free-tier write quota) and stops songs.updated_at from being
+ * bumped when nothing changed. A null field in the master means "this
+ * master format does not carry it" (e.g. v1 has no notecounts) and never
+ * counts as a change by itself.
+ */
+export function planSync(
+  existingSongs: SongRow[],
+  existingCharts: ChartRow[],
+  masterSongs: SongRow[],
+  masterCharts: ChartRow[],
+): { songUpserts: SongRow[]; chartUpserts: ChartRow[] } {
+  const songById = new Map(existingSongs.map((s) => [s.song_id, s]));
+  const songUpserts = masterSongs.filter((m) => {
+    const e = songById.get(m.song_id);
+    if (!e) return true;
+    return (
+      e.title !== m.title ||
+      e.title_normalized !== m.title_normalized ||
+      e.artist !== m.artist ||
+      e.version !== m.version ||
+      e.bpm !== m.bpm ||
+      e.availability !== m.availability ||
+      e.deleted_at !== m.deleted_at ||
+      (m.phash_8 != null && e.phash_8 !== m.phash_8) ||
+      (m.phash_16 != null && e.phash_16 !== m.phash_16)
+    );
+  });
+  const chartById = new Map(existingCharts.map((ch) => [ch.chart_id, ch]));
+  const chartUpserts = masterCharts.filter((m) => {
+    const e = chartById.get(m.chart_id);
+    if (!e) return true;
+    if (e.level !== m.level) return true;
+    // v2 masters carry notecounts; refresh them when they actually change.
+    if (m.notes != null && (e.notes !== m.notes || e.freeze !== m.freeze || e.shock !== m.shock)) return true;
+    return false;
+  });
+  return { songUpserts, chartUpserts };
+}
+
+/**
  * Validate a client-supplied capture time (ISO string from EXIF etc.).
  * Returns epoch ms (the unit scores.played_at uses), or null when
  * unusable: unparseable, before 2010, or more than 1 hour in the future

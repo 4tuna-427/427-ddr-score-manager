@@ -11,6 +11,11 @@ compatibility_date = "2024-12-01"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 MASTER_URL = "https://4tuna-427.github.io/ddr-song-data/songs.json"
 
+# Daily master auto-sync. Cron expressions are UTC: 19:00 UTC = 04:00 JST,
+# one hour after the song-data pipeline's 03:00 JST update.
+[triggers]
+crons = ["0 19 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "ddr-score-db"

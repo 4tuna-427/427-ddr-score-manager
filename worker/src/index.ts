@@ -5,6 +5,7 @@ import {
   choosePlayer,
   evaluateScore,
   expandMaster,
+  planSync,
   normalizeTitle,
   parsePlayedAt,
   jstDateString,
@@ -606,29 +607,42 @@ app.get("/api/charts/:chart_id/history", async (c) => {
   return c.json({ chart: chartRow, items: results });
 });
 
-// ---- POST /api/admin/sync ----
-app.post("/api/admin/sync", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { url?: string };
-  const url = body.url || c.env.MASTER_URL || DEFAULT_MASTER_URL;
+// ---- master sync (shared by POST /api/admin/sync and the daily cron) ----
+async function syncMaster(
+  db: D1Database,
+  url: string,
+): Promise<{ songs: number; charts: number; songWrites: number; chartWrites: number }> {
   const res = await fetch(url);
-  if (!res.ok) return c.json({ error: `master fetch failed: ${res.status}` }, 502);
+  if (!res.ok) throw new Error(`master fetch failed: ${res.status}`);
   const raw = (await res.json()) as Array<Record<string, any>>;
-  if (!Array.isArray(raw)) return c.json({ error: "master is not an array" }, 502);
+  if (!Array.isArray(raw)) throw new Error("master is not an array");
   const { songs, charts } = expandMaster(raw);
   const now = Date.now();
 
-  const songStmt = c.env.DB.prepare(
+  // Only write rows that actually changed (see planSync in lib.ts).
+  const { results: existingSongs } = await db
+    .prepare(
+      "SELECT song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at FROM songs",
+    )
+    .all<SongRow>();
+  const { results: existingCharts } = await db
+    .prepare("SELECT chart_id, song_id, play_style, difficulty, level, notes, freeze, shock, max_ex FROM charts")
+    .all<ChartRow>();
+  const { songUpserts, chartUpserts } = planSync(existingSongs, existingCharts, songs, charts);
+
+  const songStmt = db.prepare(
     `INSERT INTO songs (song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(song_id) DO UPDATE SET
        title = excluded.title, title_normalized = excluded.title_normalized,
        artist = excluded.artist, version = excluded.version, bpm = excluded.bpm,
-       phash_8 = excluded.phash_8, phash_16 = excluded.phash_16,
+       phash_8 = COALESCE(excluded.phash_8, songs.phash_8),
+       phash_16 = COALESCE(excluded.phash_16, songs.phash_16),
        availability = excluded.availability, deleted_at = excluded.deleted_at,
        updated_at = excluded.updated_at`,
   );
   // v1 masters carry no notecounts: keep existing notes/freeze/shock/max_ex via COALESCE.
-  const chartStmt = c.env.DB.prepare(
+  const chartStmt = db.prepare(
     `INSERT INTO charts (chart_id, song_id, play_style, difficulty, level, notes, freeze, shock, max_ex)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(chart_id) DO UPDATE SET
@@ -640,19 +654,49 @@ app.post("/api/admin/sync", async (c) => {
   );
 
   const stmts: D1PreparedStatement[] = [];
-  for (const s of songs) {
+  for (const s of songUpserts) {
     stmts.push(songStmt.bind(s.song_id, s.title, s.title_normalized, s.artist, s.version, s.bpm,
       s.phash_8, s.phash_16, s.availability, s.deleted_at, now));
   }
-  for (const ch of charts) {
+  for (const ch of chartUpserts) {
     stmts.push(chartStmt.bind(ch.chart_id, ch.song_id, ch.play_style, ch.difficulty, ch.level,
       ch.notes, ch.freeze, ch.shock, ch.max_ex));
   }
   const BATCH = 100;
   for (let i = 0; i < stmts.length; i += BATCH) {
-    await c.env.DB.batch(stmts.slice(i, i + BATCH));
+    await db.batch(stmts.slice(i, i + BATCH));
   }
-  return c.json({ songs: songs.length, charts: charts.length });
+  return { songs: songs.length, charts: charts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length };
+}
+
+// ---- POST /api/admin/sync ----
+app.post("/api/admin/sync", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { url?: string };
+  const url = body.url || c.env.MASTER_URL || DEFAULT_MASTER_URL;
+  try {
+    return c.json(await syncMaster(c.env.DB, url));
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
 });
 
-export default app;
+const handler: ExportedHandler<Env> = {
+  fetch: app.fetch,
+  // Daily master auto-sync (cron in wrangler.toml: 04:00 JST, after the
+  // song-data pipeline's 03:00 JST update). Failures are logged, never
+  // thrown, and can be checked in the Worker's logs; the manual
+  // POST /api/admin/sync endpoint remains available as a fallback.
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(
+      syncMaster(env.DB, env.MASTER_URL || DEFAULT_MASTER_URL)
+        .then((r) =>
+          console.log(
+            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites}`,
+          ),
+        )
+        .catch((e) => console.error(`[cron sync] failed: ${e instanceof Error ? e.message : String(e)}`)),
+    );
+  },
+};
+
+export default handler;

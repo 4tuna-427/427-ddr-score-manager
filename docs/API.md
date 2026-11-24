@@ -76,9 +76,10 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes+shock を比較（charts が無い/notes が無い場合は 'no_master'）。不一致は needs_review=1。
 - レスポンス 201: `{score: <scores行>, previous: {score, ex_score, diff, played_at} | null}`（previous は同一 chart の直前レコード）
 
-### GET /api/browse?q=&style=&difficulty=&level=&version=&played=&sort=&limit=&offset=
-→ 譜面ブラウズ。マスタ全譜面に自己ベスト集計を結合して返す `{items, total}`。
-- 絞り込み: `q`（曲名の正規化部分一致 or アーティスト部分一致）、`style` SP/DP、`difficulty`、`level`（完全一致）、`version`（完全一致）、`played` = played|unplayed
+### GET /api/browse?q=&style=&difficulty=&level=&version=&category=&played=&sort=&limit=&offset=
+→ 譜面ブラウズ。マスタ全譜面に自己ベスト集計を結合して返す `{items, total}`。各 item には `category` が付く。
+- カテゴリ: 楽曲の収録バージョン（フォルダ＝初出バージョン。後から追加された譜面では分類しない）で判定する。CLASSIC = 1st〜X3 VS 2ndMIX / WHITE = (2013)〜A / GOLD = A20〜WORLD。判定は lib の `songCategory`（表記ゆれ吸収つき）。songs.version は「現行フォルダ ?? RemyWiki初出」の順で格納済みで、全1,485曲が分類できる（CLASSIC 479曲 / WHITE 306曲 / GOLD 700曲）。
+- 絞り込み: `q`（曲名の正規化部分一致 or アーティスト部分一致）、`style` SP/DP、`difficulty`、`level`（完全一致）、`version`（完全一致）、`category` = CLASSIC|WHITE|GOLD、`played` = played|unplayed
 - `sort`: level（既定）| title | best（ベストスコア降順、未プレイは最後）| recent（最終プレイ降順、未プレイは最後）
 - 各 item: 譜面・曲情報＋ `best_score` / `plays` / `last_played`、ベスト記録の `best_ex_score` / `best_rank` / `best_lamp`
 
@@ -114,7 +115,9 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 ### POST /api/admin/sync  `{url?: string}`
 - 既定URLは環境変数 `MASTER_URL`（無ければ https://4tuna-427.github.io/ddr-song-data/songs.json ）
 - v1形式（levels が `single_*_level` 等のフラット）と v2形式（`levels`/`notecounts` オブジェクト）の両方を自動判別して upsert する。v1 で notecounts が無い場合、既存 charts の notes/freeze/shock は上書きしない（保持）。
-- レスポンス: `{songs: n, charts: m}`
+- 差分があった行だけを書き込む（`planSync`）。マスタが持たない項目（null）は変更とみなさない。
+- レスポンス: `{songs: n, charts: m, songWrites: w1, chartWrites: w2}`（songs/charts はマスタ全体の件数、Writes は実際に書き込んだ行数）
+- 自動同期: Worker の Cron Trigger（毎日 04:00 JST、wrangler.toml の `[triggers]`）が同じ処理を実行する。失敗時は Worker のログに `[cron sync] failed:` が残る（手動エンドポイントはフォールバック）。
 
 ## Gemini 連携
 - エンドポイント: `POST https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent`、ヘッダ `x-goog-api-key: {GEMINI_API_KEY}`（どちらも Workers 環境変数/シークレット。GEMINI_MODEL 既定 gemini-3.5-flash-lite）

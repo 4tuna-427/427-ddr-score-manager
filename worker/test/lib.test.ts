@@ -209,3 +209,51 @@ test("songCategory classifies by version folder with spelling variants", async (
   assert.equal(songCategory(""), null);
   assert.equal(songCategory("SOMETHING ELSE"), null);
 });
+
+test("planSync writes only new or actually-changed rows", async () => {
+  const { planSync } = await import("../src/lib");
+  type S = import("../src/lib").SongRow;
+  type C = import("../src/lib").ChartRow;
+  const song = (over: Partial<S> = {}): S => ({
+    song_id: "s1", title: "Song", title_normalized: "song", artist: "Artist",
+    version: "WORLD", bpm: "150", phash_8: "aa", phash_16: "bb",
+    availability: null, deleted_at: null, ...over,
+  });
+  const chart = (over: Partial<C> = {}): C => ({
+    chart_id: "s1-SP-EXPERT", song_id: "s1", play_style: "SP", difficulty: "EXPERT",
+    level: 15, notes: 500, freeze: 10, shock: 0, max_ex: 1530, ...over,
+  });
+
+  // Identical master -> no writes at all.
+  let plan = planSync([song()], [chart()], [song()], [chart()]);
+  assert.equal(plan.songUpserts.length, 0);
+  assert.equal(plan.chartUpserts.length, 0);
+
+  // New song + its chart -> both written.
+  plan = planSync([], [], [song()], [chart()]);
+  assert.equal(plan.songUpserts.length, 1);
+  assert.equal(plan.chartUpserts.length, 1);
+
+  // Changed title / level -> written.
+  plan = planSync([song()], [chart()], [song({ title: "Song (Remix)" })], [chart({ level: 16 })]);
+  assert.equal(plan.songUpserts.length, 1);
+  assert.equal(plan.chartUpserts.length, 1);
+
+  // v1-style master (phash carried, notecounts null) with same level -> no
+  // chart write, and a null master phash never counts as a song change.
+  plan = planSync(
+    [song()], [chart()],
+    [song({ phash_8: null, phash_16: null })],
+    [chart({ notes: null, freeze: null, shock: null, max_ex: null })],
+  );
+  assert.equal(plan.songUpserts.length, 0);
+  assert.equal(plan.chartUpserts.length, 0);
+
+  // v2 notecount change at the same level -> chart written.
+  plan = planSync([song()], [chart()], [song()], [chart({ notes: 501 })]);
+  assert.equal(plan.chartUpserts.length, 1);
+
+  // Tombstone appearing in the master -> song written.
+  plan = planSync([song()], [chart()], [song({ deleted_at: "2026-01-01" })], [chart()]);
+  assert.equal(plan.songUpserts.length, 1);
+});
