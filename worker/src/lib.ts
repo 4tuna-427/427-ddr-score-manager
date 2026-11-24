@@ -308,3 +308,18 @@ charts.push(...cs);
 }
 return { songs, charts};
 }
+
+/**
+ * Validate a client-supplied capture time (ISO string from EXIF etc.).
+ * Returns epoch ms (the unit scores.played_at uses), or null when
+ * unusable: unparseable, before 2010, or more than 1 hour in the future
+ * (clock-skew allowance).
+ */
+export function parsePlayedAt(input: unknown, nowMs: number): number | null {
+  if (typeof input !== "string" || !input) return null;
+  const ms = Date.parse(input);
+  if (Number.isNaN(ms)) return null;
+  if (ms < 1262304000000) return null; // 2010-01-01
+  if (ms > nowMs + 3600000) return null;
+  return ms;
+}

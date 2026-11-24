@@ -68,12 +68,16 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 ### GET /api/health → `{ok:true}`
 
 ### POST /api/analyze
-- リクエスト: `multipart/form-data`、フィールド `file`（画像）、任意で `source`。
+- リクエスト: `multipart/form-data`、フィールド `file`（画像）、任意で `source`、任意で `played_at`（ISO文字列。写真の撮影日時=EXIF由来。妥当な範囲（2010年以降・未来+1時間以内）ならその値を scores.played_at に採用し、無効ならアップロード時刻を使う）。
+- 重複検出: 受信画像バイト列の SHA-256 を scores.image_hash と照合し、一致したら Gemini を呼ばずに `409 {error:"duplicate", score_id}` を返す（migration 0002 適用後に有効。未適用時はチェックをスキップ）。
 - 処理: 画像を長辺1600px相当のまま Gemini に送信（Workers では受け取った Blob をそのまま中継し、リサイズはフロント側で行う前提。未リサイズでも受け付ける）→ 抽出 → 自プレイヤー確定 → 曲名寄せ → 検算 → D1保存。
 - 自プレイヤー確定: 環境変数 `MY_DANCER_NAME`（例 4TUNA）と正規化比較（大文字小文字無視、前後空白除去）で一致したプレイヤーを採用。ソロは player_1。バーサスで両方一致しない場合は player_1 を仮採用し `needs_review=1`、`raw_extraction` に全体を保存。
 - 曲名寄せ: 抽出タイトルを正規化（NFKC、ゼロ幅除去、記号・空白除去、小文字化）して songs.title_normalized と完全一致を検索。一意なら chart を特定（play_style+difficulty）。複数候補・不一致なら chart_id=NULL、needs_review=1。
 - 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes+shock を比較（charts が無い/notes が無い場合は 'no_master'）。不一致は needs_review=1。
 - レスポンス 201: `{score: <scores行>, previous: {score, ex_score, diff, played_at} | null}`（previous は同一 chart の直前レコード）
+
+### GET /api/export
+→ 全スコア（songs 結合つき、played_at 昇順）を `{exported_at, count, scores}` で返す。`Content-Disposition: attachment` つきのバックアップ用JSON。
 
 ### GET /api/scores?limit=50&offset=0&needs_review=0|1
 → `{items: [<scores行 + song_title, artist>], total}`（played_at 降順）

@@ -21,6 +21,12 @@ npx wrangler d1 create ddr-score-db
 ```bash
 npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0001_init.sql
 ```
+
+### 既存DBへの追加マイグレーション（Phase 1.1）
+Phase 1.1 の Worker は scores.image_hash に書き込むため、**Worker を再デプロイする前に**適用すること:
+```bash
+npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0002_phase11.sql
+```
 初期マスタ（1,485曲・ノーツ数つき）はシードSQLを使う。ファイルが大きいので分割して投入する:
 ```bash
 cd ../scripts
@@ -55,11 +61,27 @@ curl https://ddr-score-api.<account>.workers.dev/api/health
 curl -H "X-API-Token: <API_TOKEN>" "https://ddr-score-api.<account>.workers.dev/api/songs?q=Roll"
 ```
 
-## 5. フロントエンド（Pages）
-1. この `app/` を GitHub リポジトリに push する（例: `ddr-score-manager`）
+## 5. フロントエンド（Pages）— 2ルートから選ぶ
+
+API（手順1〜4）はどちらのルートでもローカルの wrangler から操作する。違うのはフロント（PWA）の上げ方だけ。
+
+### ルートA：GitHub連携でデプロイ（推奨・宅建アプリと同じ方式）
+push するたびに自動デプロイされ、Cloudflare側で前回デプロイへのロールバックもできる。
+1. この `app/` を GitHub リポジトリに push する（例: `ddr-score-manager`）。`.gitignore` を同梱済みなので、手順0で作られた `node_modules/` や `web/dist/` は push されない
 2. Cloudflare ダッシュボード → Workers & Pages → Create → Pages → Connect to Git でリポジトリを選択
 3. ビルド設定: Root directory = `web`、Build command = `npm run build`、Output = `dist`、Framework preset = Vite
 4. デプロイされた URL をスマホで開く
+5. 更新時は `git push` するだけ（API側の変更がある場合は手順4の `wrangler deploy` も別途行う）
+
+### ルートB：ローカルから wrangler で直接デプロイ（リポジトリ不要）
+GitHub にリポジトリを作りたくない場合。更新のたびに下のコマンドを打つ形になる。
+```bash
+cd app/web && npm run build
+cd ../worker && npx wrangler pages deploy ../web/dist --project-name ddr-score-manager
+```
+※ `web/` には wrangler が入っていないため、wrangler が入っている `worker/` フォルダから実行する（手順0で `npm install` 済み）。初回はプロジェクトが新規作成され、`https://ddr-score-manager.pages.dev` が表示される。2回目以降は同じコマンドで上書きデプロイされる。表示された URL をスマホで開く。
+
+どちらを選んでも、PWA の動作・Share Target・APIとの接続は同じ。迷ったらルートAでよい。
 
 ## 6. 初期設定（スマホ）
 1. PWA の「設定」タブで、APIベースURL に手順4の Workers URL、APIトークンに手順3の API_TOKEN を入れて保存

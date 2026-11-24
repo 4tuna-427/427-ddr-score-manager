@@ -6,6 +6,7 @@ import {
   evaluateScore,
   expandMaster,
   normalizeTitle,
+  parsePlayedAt,
   type ChartRow,
   type Extraction,
   type PlayerExtraction,
@@ -203,6 +204,24 @@ app.post("/api/analyze", async (c) => {
     ? sourceRaw
     : "share";
 
+  // Duplicate check on the uploaded (resized) image bytes, before spending
+  // a Gemini call. The hash is of the converted image the client sends,
+  // so re-uploading the same photo from the same device matches.
+  const imageBytes = await (file as Blob).arrayBuffer();
+  const imageHash = Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", imageBytes)),
+    (b) => b.toString(16).padStart(2, "0"),
+  ).join("");
+  try {
+    const dup = await c.env.DB
+      .prepare("SELECT id FROM scores WHERE image_hash = ?")
+      .bind(imageHash)
+      .first<{ id: string }>();
+    if (dup) return c.json({ error: "duplicate", score_id: dup.id }, 409);
+  } catch {
+    // image_hash column missing (migration 0002 not applied yet): skip check.
+  }
+
   let extraction: Extraction;
   try {
     extraction = await extractFromImage(c.env, file);
@@ -236,10 +255,13 @@ app.post("/api/analyze", async (c) => {
 
   const id = genId();
   const now = Date.now();
-  const cols = ["id", ...SCORE_COLUMNS, "source", "raw_extraction", "played_at", "created_at"];
+  // played_at: prefer the photo's capture time sent by the client (EXIF),
+  // validated by parsePlayedAt; fall back to upload time.
+  const playedAt = parsePlayedAt(form.get("played_at"), now) ?? now;
+  const cols = ["id", ...SCORE_COLUMNS, "image_hash", "source", "raw_extraction", "played_at", "created_at"];
   await c.env.DB
     .prepare(`INSERT INTO scores (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
-    .bind(id, ...fieldsToValues(fields), source, JSON.stringify(extraction), now, now)
+    .bind(id, ...fieldsToValues(fields), imageHash, source, JSON.stringify(extraction), playedAt, now)
     .run();
 
   const score = await getScore(c.env.DB, id);
@@ -247,6 +269,29 @@ app.post("/api/analyze", async (c) => {
 });
 
 // ---- GET /api/scores ----
+// ---- export: full score history as a downloadable JSON backup ----
+app.get("/api/export", async (c) => {
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist
+       FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
+       ORDER BY s.played_at ASC`,
+    )
+    .all();
+  const payload = {
+    exported_at: new Date().toISOString(),
+    count: results.length,
+    scores: results,
+  };
+  return new Response(JSON.stringify(payload, null, 2), {
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Disposition": 'attachment; filename="ddr-scores-export.json"',
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+});
+
 app.get("/api/scores", async (c) => {
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "50", 10) || 50, 1), 500);
   const offset = Math.max(parseInt(c.req.query("offset") ?? "0", 10) || 0, 0);

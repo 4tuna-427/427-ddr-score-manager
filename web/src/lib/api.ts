@@ -67,6 +67,14 @@ export interface SongSearchItem {
   charts: { chart_id: string; play_style: string; difficulty: string; level: number | null }[]
 }
 
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const base = getApiBaseUrl()
   const headers = new Headers(init.headers || {})
@@ -79,16 +87,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       const body = await res.json()
       if (body && body.error) msg = body.error
     } catch { /* keep default */ }
-    throw new Error(msg)
+    throw new ApiError(res.status, msg)
   }
   return (await res.json()) as T
 }
 
-export function analyzeImage(file: Blob, source: string): Promise<AnalyzeResult> {
+export function analyzeImage(file: Blob, source: string, playedAtIso?: string): Promise<AnalyzeResult> {
   const fd = new FormData()
   fd.append('file', file, 'result.webp')
   fd.append('source', source)
+  if (playedAtIso) fd.append('played_at', playedAtIso)
   return request<AnalyzeResult>('/api/analyze', { method: 'POST', body: fd })
+}
+
+export async function fetchExportBlob(): Promise<Blob> {
+  const base = getApiBaseUrl()
+  const headers = new Headers()
+  const token = getApiToken()
+  if (token) headers.set('X-API-Token', token)
+  const res = await fetch(`${base}/api/export`, { headers })
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`)
+  return res.blob()
 }
 
 export function listScores(params: { limit?: number; offset?: number; needsReview?: boolean } = {}): Promise<{ items: Score[]; total: number }> {

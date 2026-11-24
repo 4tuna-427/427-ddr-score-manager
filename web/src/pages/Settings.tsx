@@ -1,10 +1,26 @@
 import { useState } from 'react'
-import { getApiBaseUrl, getApiToken, setApiBaseUrl, setApiToken } from '../lib/api'
+import { fetchExportBlob, getApiBaseUrl, getApiToken, setApiBaseUrl, setApiToken } from '../lib/api'
 
 export function SettingsPage() {
   const [token, setToken] = useState(getApiToken())
   const [base, setBase] = useState(getApiBaseUrl())
   const [saved, setSaved] = useState(false)
+  const [exportMsg, setExportMsg] = useState('')
+
+  const doExport = async () => {
+    try {
+      const blob = await fetchExportBlob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ddr-scores-export-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      setExportMsg('エクスポートしました')
+    } catch (e) {
+      setExportMsg(`エクスポートに失敗しました: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   const save = () => {
     setApiToken(token.trim())
@@ -29,6 +45,12 @@ export function SettingsPage() {
         {saved && <span className="muted">保存しました</span>}
       </div>
       <p className="muted">トークンとベースURLはこの端末の localStorage にのみ保存されます。</p>
+      <div className="card form">
+        <h2>データのバックアップ</h2>
+        <p className="muted">登録済みスコア全件を JSON ファイルでダウンロードします。</p>
+        <button type="button" onClick={doExport}>スコアをエクスポート（JSON）</button>
+        {exportMsg && <span className="muted">{exportMsg}</span>}
+      </div>
     </div>
   )
 }

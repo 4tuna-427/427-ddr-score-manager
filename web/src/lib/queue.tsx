@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { addQueueItem, deleteQueueItem, listQueueItems, updateQueueItem, type QueueItem } from './db'
 import { convertImage } from './image'
-import { analyzeImage, type AnalyzeResult } from './api'
+import { analyzeImage, ApiError, type AnalyzeResult } from './api'
+import { estimateCaptureDate } from './exif'
 
 interface QueueContextValue {
   items: QueueItem[]
@@ -46,23 +47,32 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const list = await listQueueItems()
         setItems(list)
-        const next = list.find((i) => i.status !== 'sending' && !attempted.has(i.id))
+        const next = list.find((i) => (i.status === 'pending' || i.status === 'error') && !attempted.has(i.id))
         if (!next) break
         attempted.add(next.id)
         const sending: QueueItem = { ...next, status: 'sending', error: undefined }
         await updateQueueItem(sending)
         try {
+          // Capture time from the ORIGINAL photo (EXIF) before resizing,
+          // because the resize step strips metadata.
+          const captured = await estimateCaptureDate(next.blob, next.createdAt)
           const converted = await convertImage(next.blob)
-          const result = await analyzeImage(converted, next.source || 'upload')
+          const result = await analyzeImage(converted, next.source || 'upload', captured.toISOString())
           await deleteQueueItem(next.id)
           setLastResults((prev) => [result, ...prev])
         } catch (e) {
-          const failed: QueueItem = {
-            ...next,
-            status: 'error',
-            error: e instanceof Error ? e.message : String(e),
+          if (e instanceof ApiError && e.status === 409) {
+            // Same image already registered: park it, never auto-retry.
+            const dup: QueueItem = { ...next, status: 'duplicate', error: '同じ画像が既に登録されています' }
+            await updateQueueItem(dup)
+          } else {
+            const failed: QueueItem = {
+              ...next,
+              status: 'error',
+              error: e instanceof Error ? e.message : String(e),
+            }
+            await updateQueueItem(failed)
           }
-          await updateQueueItem(failed)
         }
         setItems(await listQueueItems())
       }

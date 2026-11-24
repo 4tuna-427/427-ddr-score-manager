@@ -144,3 +144,15 @@ test("v2 expansion computes max_ex from notecounts", () => {
   assert.equal(spBeginner.notes, nc.notes);
   assert.equal(spBeginner.max_ex, (nc.notes + nc.freeze + (nc.shock ?? 0)) * 3);
 });
+
+test("parsePlayedAt accepts plausible ISO times and rejects bad ones", async () => {
+  const { parsePlayedAt } = await import("../src/lib");
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  assert.equal(parsePlayedAt("2026-11-23T07:38:10.000Z", now), Date.parse("2026-11-23T07:38:10.000Z"));
+  assert.equal(parsePlayedAt("2026-11-24T12:30:00Z", now), Date.parse("2026-11-24T12:30:00Z")); // +30min skew ok
+  assert.equal(parsePlayedAt("2026-11-25T12:00:00Z", now), null); // a day in the future
+  assert.equal(parsePlayedAt("2005-01-01T00:00:00Z", now), null); // too old
+  assert.equal(parsePlayedAt("not a date", now), null);
+  assert.equal(parsePlayedAt(null, now), null);
+  assert.equal(parsePlayedAt(123, now), null);
+});

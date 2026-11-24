@@ -46,7 +46,7 @@ export function HomePage() {
             <li key={i.id}>
               <span>{i.name}</span>
               <span className="muted">
-                {i.status === 'error' ? `再試行待ち（一時的なエラーのため自動で再送します）: ${i.error || ''}` : i.status === 'sending' ? '送信中' : '待機中'}
+                {i.status === 'duplicate' ? '重複：同じ画像が登録済みです（削除してください）' : i.status === 'error' ? `再試行待ち（一時的なエラーのため自動で再送します）: ${i.error || ''}` : i.status === 'sending' ? '送信中' : '待機中'}
               </span>
               <button type="button" onClick={() => remove(i.id)}>削除</button>
             </li>

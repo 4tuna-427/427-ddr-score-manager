@@ -9,7 +9,7 @@ export interface QueueItem {
   name: string
   type: string
   createdAt: number
-  status: 'pending' | 'sending' | 'error'
+  status: 'pending' | 'sending' | 'error' | 'duplicate'
   source: string
   error?: string
 }
