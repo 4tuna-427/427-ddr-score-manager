@@ -368,14 +368,30 @@ export async function extractFromImage(
       temperature: 0,
     },
   };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${text.slice(0, 500)}`);
+  // The free tier (especially flash-lite) returns transient 503
+  // "high demand" errors in bursts. Retry those (and 429) with backoff
+  // inside the request so the client rarely sees them.
+  const RETRY_DELAYS_MS = [1500, 4000, 9000];
+  let res: Response | null = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      if (attempt === RETRY_DELAYS_MS.length) throw e;
+      res = null;
+    }
+    if (res && res.ok) break;
+    if (res && res.status !== 503 && res.status !== 429) break;
+    if (attempt === RETRY_DELAYS_MS.length) break;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+  }
+  if (!res || !res.ok) {
+    const text = res ? await res.text() : "";
+    throw new Error(`Gemini API error ${res ? res.status : "network"}: ${text.slice(0, 500)}`);
   }
   const data: any = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;

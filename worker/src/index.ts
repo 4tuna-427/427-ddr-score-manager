@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import {
   chartId as makeChartId,
   choosePlayer,
@@ -25,8 +26,23 @@ const DEFAULT_MASTER_URL = "https://4tuna-427.github.io/ddr-song-data/songs.json
 
 const app = new Hono<{ Bindings: Env }>();
 
+// ---- CORS: the PWA is served from a different origin (pages.dev) ----
+// Registered before auth so preflight OPTIONS requests (which carry no
+// X-API-Token) are answered here. Auth uses a header token, not cookies,
+// so a wildcard origin is safe for this personal app.
+app.use(
+  "/api/*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+    allowHeaders: ["Content-Type", "X-API-Token"],
+    maxAge: 86400,
+  }),
+);
+
 // ---- auth: every /api/* needs X-API-Token except GET /api/health ----
 app.use("/api/*", async (c, next) => {
+  if (c.req.method === "OPTIONS") return next();
   if (c.req.path === "/api/health") return next();
   const token = c.req.header("X-API-Token");
   if (!c.env.API_TOKEN || !token || token !== c.env.API_TOKEN) {
