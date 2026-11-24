@@ -1,0 +1,27 @@
+{
+  "song_title": "THE SAFARI (STARDOM Remix)",
+  "play_style": "SP",
+  "is_versus": false,
+  "player_1": {
+    "dancer_name": "4TUNA",
+    "difficulty": "CHALLENGE",
+    "level": 16,
+    "score": 992880,
+    "ex_score": 1589,
+    "rank": "AAA",
+    "clear_lamp": "GFC",
+    "flare_rank": "EX",
+    "flare_skill": null,
+    "max_combo": 533,
+    "marvelous": 472,
+    "perfect": 52,
+    "great": 9,
+    "good": 0,
+    "ok": 20,
+    "miss": 0,
+    "fast_count": 40,
+    "slow_count": 21
+  },
+  "player_2": null,
+  "jacket_bbox": null
+}

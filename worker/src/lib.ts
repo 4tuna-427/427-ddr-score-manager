@@ -323,3 +323,56 @@ export function parsePlayedAt(input: unknown, nowMs: number): number | null {
   if (ms > nowMs + 3600000) return null;
   return ms;
 }
+
+/** JST (UTC+9) calendar date "YYYY-MM-DD" for an epoch-ms timestamp. */
+export function jstDateString(ms: number): string {
+  return new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** Epoch ms of 00:00 JST on the given "YYYY-MM-DD" date. */
+export function jstDayStartMs(date: string): number {
+  return Date.parse(`${date}T00:00:00+09:00`);
+}
+
+export interface DayScoreRow {
+  id: string;
+  chart_id: string | null;
+  score: number;
+  played_at: number;
+}
+
+export interface DayUpdate<T extends DayScoreRow> {
+  row: T;
+  prev_best: number | null;
+  diff: number | null;
+  is_new: boolean;
+}
+
+/**
+ * From one day's scores (any order) and each chart's best score BEFORE
+ * that day, compute which charts got a personal-best update that day.
+ * A chart played several times counts once, with its best score of the day.
+ */
+export function computeDayUpdates<T extends DayScoreRow>(
+  dayScores: T[],
+  prevBestByChart: Map<string, number>,
+): DayUpdate<T>[] {
+  const bestByChart = new Map<string, T>();
+  for (const s of dayScores) {
+    if (!s.chart_id) continue;
+    const cur = bestByChart.get(s.chart_id);
+    if (!cur || s.score > cur.score || (s.score === cur.score && s.played_at > cur.played_at)) {
+      bestByChart.set(s.chart_id, s);
+    }
+  }
+  const updates: DayUpdate<T>[] = [];
+  for (const [chartId, row] of bestByChart) {
+    const prev = prevBestByChart.get(chartId);
+    if (prev === undefined) {
+      updates.push({ row, prev_best: null, diff: null, is_new: true });
+    } else if (row.score > prev) {
+      updates.push({ row, prev_best: prev, diff: row.score - prev, is_new: false });
+    }
+  }
+  return updates.sort((a, b) => (b.diff ?? Number.MAX_SAFE_INTEGER) - (a.diff ?? Number.MAX_SAFE_INTEGER));
+}

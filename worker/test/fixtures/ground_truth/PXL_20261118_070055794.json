@@ -1,0 +1,27 @@
+{
+  "song_title": "Steps for Victory (U1 Heavy Metal Edition)",
+  "play_style": "SP",
+  "is_versus": false,
+  "player_1": {
+    "dancer_name": "4TUNA",
+    "difficulty": "CHALLENGE",
+    "level": 18,
+    "score": 955920,
+    "ex_score": 1833,
+    "rank": "AA+",
+    "clear_lamp": "CLEAR",
+    "flare_rank": "VI",
+    "flare_skill": null,
+    "max_combo": 530,
+    "marvelous": 460,
+    "perfect": 162,
+    "great": 72,
+    "good": 0,
+    "ok": 19,
+    "miss": 1,
+    "fast_count": 204,
+    "slow_count": 30
+  },
+  "player_2": null,
+  "jacket_bbox": null
+}

@@ -21,6 +21,7 @@ export function ChartPage() {
 
   const chart = data.chart
   const title = chart.song_title || chart.title || '(曲名不明)'
+  const items = data.items.map((s) => ({ ...s, chart_max_ex: s.chart_max_ex ?? chart.max_ex ?? null }))
   const points = data.items.map((s) => ({
     t: s.played_at,
     date: fmtDate(s.played_at),
@@ -51,7 +52,7 @@ export function ChartPage() {
         )}
       </div>
       <h2>履歴</h2>
-      <ScoreList items={[...data.items].reverse()} />
+      <ScoreList items={[...items].reverse()} />
     </div>
   )
 }

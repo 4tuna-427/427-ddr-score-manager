@@ -46,6 +46,7 @@ export interface Score {
   created_at: number
   song_title?: string | null
   artist?: string | null
+  chart_max_ex?: number | null
 }
 
 export interface PreviousScore {
@@ -157,11 +158,29 @@ export interface ChartHistory {
     play_style: string
     difficulty: string
     level: number | null
+    max_ex?: number | null
     title?: string | null
     song_title?: string | null
     artist?: string | null
   }
   items: Score[]
+}
+
+export interface DayUpdate extends Score {
+  prev_best: number | null
+  diff: number | null
+  is_new: boolean
+}
+
+export interface LatestDaySummary {
+  date: string | null
+  total_plays: number
+  unique_charts: number
+  updates: DayUpdate[]
+}
+
+export function getLatestDaySummary(): Promise<LatestDaySummary> {
+  return request('/api/summary/latest-day')
 }
 
 export function getChartHistory(chartId: string): Promise<ChartHistory> {

@@ -7,6 +7,9 @@ import {
   expandMaster,
   normalizeTitle,
   parsePlayedAt,
+  jstDateString,
+  jstDayStartMs,
+  computeDayUpdates,
   type ChartRow,
   type Extraction,
   type PlayerExtraction,
@@ -174,7 +177,16 @@ function fieldsToValues(f: ScoreFields): unknown[] {
 }
 
 async function getScore(db: D1Database, id: string): Promise<Record<string, unknown> | null> {
-  const row = await db.prepare("SELECT * FROM scores WHERE id = ?").bind(id).first<Record<string, unknown>>();
+  const row = await db
+    .prepare(
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
+       FROM scores s
+       LEFT JOIN songs ON songs.song_id = s.song_id
+       LEFT JOIN charts ON charts.chart_id = s.chart_id
+       WHERE s.id = ?`,
+    )
+    .bind(id)
+    .first<Record<string, unknown>>();
   return row ?? null;
 }
 
@@ -269,12 +281,58 @@ app.post("/api/analyze", async (c) => {
 });
 
 // ---- GET /api/scores ----
+// ---- latest play day (JST) summary: plays + personal-best updates ----
+app.get("/api/summary/latest-day", async (c) => {
+  const latest = await c.env.DB
+    .prepare("SELECT MAX(played_at) AS m FROM scores")
+    .first<{ m: number | null }>();
+  if (!latest?.m) return c.json({ date: null, total_plays: 0, unique_charts: 0, updates: [] });
+  const date = jstDateString(latest.m);
+  const start = jstDayStartMs(date);
+  const end = start + 86400000;
+  const { results: dayRows } = await c.env.DB
+    .prepare(
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
+       FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
+       LEFT JOIN charts ON charts.chart_id = s.chart_id
+       WHERE s.played_at >= ? AND s.played_at < ? ORDER BY s.played_at ASC`,
+    )
+    .bind(start, end)
+    .all<Record<string, unknown> & { id: string; chart_id: string | null; score: number; played_at: number }>();
+  const chartIds = [...new Set(dayRows.map((r) => r.chart_id).filter((x): x is string => !!x))];
+  const prevBest = new Map<string, number>();
+  if (chartIds.length > 0) {
+    const placeholders = chartIds.map(() => "?").join(", ");
+    const { results: prevRows } = await c.env.DB
+      .prepare(
+        `SELECT chart_id, MAX(score) AS best FROM scores
+         WHERE chart_id IN (${placeholders}) AND played_at < ? GROUP BY chart_id`,
+      )
+      .bind(...chartIds, start)
+      .all<{ chart_id: string; best: number }>();
+    for (const r of prevRows) prevBest.set(r.chart_id, r.best);
+  }
+  const updates = computeDayUpdates(dayRows, prevBest).map((u) => ({
+    ...u.row,
+    prev_best: u.prev_best,
+    diff: u.diff,
+    is_new: u.is_new,
+  }));
+  return c.json({
+    date,
+    total_plays: dayRows.length,
+    unique_charts: chartIds.length,
+    updates,
+  });
+});
+
 // ---- export: full score history as a downloadable JSON backup ----
 app.get("/api/export", async (c) => {
   const { results } = await c.env.DB
     .prepare(
-      `SELECT s.*, songs.title AS song_title, songs.artist AS artist
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
        FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
+       LEFT JOIN charts ON charts.chart_id = s.chart_id
        ORDER BY s.played_at ASC`,
     )
     .all();
@@ -304,8 +362,9 @@ app.get("/api/scores", async (c) => {
     .first<{ n: number }>();
   const { results } = await c.env.DB
     .prepare(
-      `SELECT s.*, songs.title AS song_title, songs.artist AS artist
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
        FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
+       LEFT JOIN charts ON charts.chart_id = s.chart_id
        ${where} ORDER BY s.played_at DESC LIMIT ? OFFSET ?`,
     )
     .bind(...binds, limit, offset)

@@ -18,13 +18,13 @@ import {
 } from "../src/lib";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const gtDir = join(here, "..", "..", "..", "phase0", "ground_truth");
-const masterPath = join(
-  here, "..", "..", "..", "..", "ddr-data-pipeline", "phase3", "out", "songs_v2.json",
-);
-const masterV1Path = join(
-  here, "..", "..", "..", "..", "ddr-data-pipeline", "phase3", "out", "songs.json",
-);
+// Fixtures are bundled in-repo (test/fixtures/) so the suite runs anywhere,
+// including a fresh clone: ground truth = the 6 real Phase 0 photos,
+// master fixtures = the matching 6 songs (v2) and 3 songs (v1), verbatim
+// excerpts of the real master data.
+const gtDir = join(here, "fixtures", "ground_truth");
+const masterPath = join(here, "fixtures", "master_v2_fixture.json");
+const masterV1Path = join(here, "fixtures", "master_v1_fixture.json");
 
 const groundTruths: Extraction[] = readdirSync(gtDir)
   .filter((f) => f.endsWith(".json"))
@@ -155,4 +155,36 @@ test("parsePlayedAt accepts plausible ISO times and rejects bad ones", async () 
   assert.equal(parsePlayedAt("not a date", now), null);
   assert.equal(parsePlayedAt(null, now), null);
   assert.equal(parsePlayedAt(123, now), null);
+});
+
+test("jstDateString / jstDayStartMs use JST boundaries", async () => {
+  const { jstDateString, jstDayStartMs } = await import("../src/lib");
+  // 2026-11-24 00:30 JST = 2026-11-23 15:30 UTC
+  assert.equal(jstDateString(Date.parse("2026-11-23T15:30:00Z")), "2026-11-24");
+  // 2026-11-24 23:59 JST = 14:59 UTC; 2026-11-25 00:00 JST = 15:00 UTC
+  assert.equal(jstDateString(Date.parse("2026-11-24T14:59:00Z")), "2026-11-24");
+  assert.equal(jstDateString(Date.parse("2026-11-24T15:00:00Z")), "2026-11-25");
+  assert.equal(jstDayStartMs("2026-11-24"), Date.parse("2026-11-23T15:00:00Z"));
+});
+
+test("computeDayUpdates picks per-chart day best and diffs vs previous best", async () => {
+  const { computeDayUpdates } = await import("../src/lib");
+  const rows = [
+    { id: "a", chart_id: "c1", score: 900000, played_at: 1000 },
+    { id: "b", chart_id: "c1", score: 920000, played_at: 2000 },
+    { id: "c", chart_id: "c2", score: 800000, played_at: 1500 },
+    { id: "d", chart_id: "c3", score: 700000, played_at: 1200 },
+    { id: "e", chart_id: null, score: 999999, played_at: 1100 },
+  ];
+  const prev = new Map([["c1", 910000], ["c3", 750000]]);
+  const ups = computeDayUpdates(rows, prev);
+  // c1: day best 920000 > 910000 -> update diff 10000; c2: new; c3: 700000 < 750000 -> none; null chart ignored
+  assert.equal(ups.length, 2);
+  const c1 = ups.find((u) => u.row.chart_id === "c1")!;
+  assert.equal(c1.row.id, "b");
+  assert.equal(c1.diff, 10000);
+  assert.equal(c1.is_new, false);
+  const c2 = ups.find((u) => u.row.chart_id === "c2")!;
+  assert.equal(c2.is_new, true);
+  assert.equal(c2.prev_best, null);
 });

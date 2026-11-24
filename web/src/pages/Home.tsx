@@ -1,14 +1,20 @@
-import { useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQueue } from '../lib/queue'
 import { ResultCard } from '../components/ResultCard'
-import { getApiToken } from '../lib/api'
+import { getApiToken, getLatestDaySummary, type LatestDaySummary } from '../lib/api'
 
 export function HomePage() {
   const { items, processing, lastResults, enqueue, remove, processNow, clearResults } = useQueue()
   const [params] = useSearchParams()
   const shared = params.get('shared') === '1'
   const fileRef = useRef<HTMLInputElement>(null)
+  const [summary, setSummary] = useState<LatestDaySummary | null>(null)
+
+  useEffect(() => {
+    if (!getApiToken()) return
+    getLatestDaySummary().then(setSummary).catch(() => setSummary(null))
+  }, [lastResults])
 
   const onFiles = async (files: FileList | null) => {
     if (!files) return
@@ -24,6 +30,39 @@ export function HomePage() {
       {shared && <p className="notice">共有された画像を受け付けました。送信キューに入っています。</p>}
       {!getApiToken() && (
         <p className="warn">APIトークンが未設定です。先に「設定」画面でトークンを保存してください。</p>
+      )}
+
+      {summary && summary.date && (
+        <div className="card">
+          <h2>直近のプレイ日：{summary.date}</h2>
+          <p className="muted">
+            {summary.total_plays}プレイ / {summary.unique_charts}譜面 / 自己ベスト更新 {summary.updates.length}件
+          </p>
+          {summary.updates.length > 0 ? (
+            <ul className="update-list">
+              {summary.updates.map((u) => (
+                <li key={u.id}>
+                  <Link to={`/charts/${encodeURIComponent(u.chart_id || '')}`}>
+                    <span className="update-title">{u.song_title || u.raw_title || '(曲名不明)'}</span>
+                    <span className="muted">
+                      {' '}{u.play_style} {u.difficulty} Lv.{u.level ?? '?'}
+                    </span>
+                    <span className="update-score">
+                      {' '}{u.score.toLocaleString()}
+                      {u.is_new ? (
+                        <span className="badge new">新規</span>
+                      ) : (
+                        <span className="diff up">+{u.diff?.toLocaleString()}</span>
+                      )}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">この日の自己ベスト更新はありませんでした。</p>
+          )}
+        </div>
       )}
 
       <div className="card">

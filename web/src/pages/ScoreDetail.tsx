@@ -5,6 +5,8 @@ import {
   type Score, type SongSearchItem,
 } from '../lib/api'
 import { fmtDate } from '../components/ScoreList'
+import { JudgeBar } from '../components/JudgeBar'
+import { exRatePercent } from '../lib/stats'
 
 const NUM_FIELDS: { key: keyof Score; label: string }[] = [
   { key: 'score', label: 'スコア' },
@@ -145,6 +147,12 @@ export function ScoreDetailPage() {
         {TEXT_FIELDS.map((f) => renderField(f.key, f.label, score[f.key], false))}
       </div>
       <p className="muted">数値をタップすると編集できます。保存すると検算が再実行されます。</p>
+
+      <div className="card">
+        <h2>判定割合</h2>
+        {exRatePercent(score) != null && <p className="muted">EX達成率 {exRatePercent(score)}%（EX {score.ex_score?.toLocaleString()} / 最大 {score.chart_max_ex?.toLocaleString()}）</p>}
+        <JudgeBar score={score} />
+      </div>
 
       {hasPlayer2 && (
         <div className="card">

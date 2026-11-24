@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { Score } from '../lib/api'
+import { exRatePercent } from '../lib/stats'
 
 export function fmtDate(ms: number): string {
   const d = new Date(ms)
@@ -21,6 +22,7 @@ export function ScoreList({ items }: { items: Score[] }) {
             </div>
             <div className="score-row-right">
               <span className="score-row-score">{s.score.toLocaleString()}</span>
+              {exRatePercent(s) != null && <span className="muted">EX {exRatePercent(s)}%</span>}
               {s.needs_review === 1 && <span className="badge">要確認</span>}
             </div>
           </Link>

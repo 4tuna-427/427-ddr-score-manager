@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { AnalyzeResult } from '../lib/api'
+import { exRatePercent } from '../lib/stats'
+import { JudgeBar } from './JudgeBar'
 
 export function ResultCard({ result }: { result: AnalyzeResult }) {
   const s = result.score
@@ -22,7 +24,13 @@ export function ResultCard({ result }: { result: AnalyzeResult }) {
       ) : (
         <div className="muted">この譜面の初記録</div>
       )}
-      {s.ex_score != null && <div className="muted">EX {s.ex_score.toLocaleString()}</div>}
+      {s.ex_score != null && (
+        <div className="muted">
+          EX {s.ex_score.toLocaleString()}
+          {exRatePercent(s) != null && <> （達成率 {exRatePercent(s)}%）</>}
+        </div>
+      )}
+      <JudgeBar score={s} />
       {s.needs_review === 1 && (
         <div className="warn">⚠ 要確認：読み取り値が検算と一致しませんでした。タップして確認・修正してください。</div>
       )}

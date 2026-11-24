@@ -1,0 +1,428 @@
+[
+ {
+  "id": "QbD9QQP9bqoD00bQQl8obibP9PloQ9Qo",
+  "title": "Boss Rush",
+  "artist": "USAO",
+  "version_current": "A",
+  "version_remy_first_ddr": "A",
+  "bpm": "190 (jubeat, SOUND VOLTEX), 95-190 (DanceDanceRevolution)",
+  "length": "2:01",
+  "levels": {
+   "sp_beginner": 4,
+   "sp_basic": 10,
+   "sp_difficult": 14,
+   "sp_expert": 16,
+   "sp_challenge": 18,
+   "dp_basic": 10,
+   "dp_difficult": 14,
+   "dp_expert": 16,
+   "dp_challenge": 18
+  },
+  "notecounts": {
+   "sp_beginner": {
+    "notes": 143,
+    "freeze": 0
+   },
+   "sp_basic": {
+    "notes": 352,
+    "freeze": 7
+   },
+   "sp_difficult": {
+    "notes": 545,
+    "freeze": 23
+   },
+   "sp_expert": {
+    "notes": 721,
+    "freeze": 15
+   },
+   "sp_challenge": {
+    "notes": 721,
+    "freeze": 39,
+    "shock": 0
+   },
+   "dp_basic": {
+    "notes": 341,
+    "freeze": 7
+   },
+   "dp_difficult": {
+    "notes": 535,
+    "freeze": 14
+   },
+   "dp_expert": {
+    "notes": 671,
+    "freeze": 11
+   },
+   "dp_challenge": {
+    "notes": 683,
+    "freeze": 34,
+    "shock": 0
+   }
+  },
+  "in_official_list": true,
+  "in_current_dataset": true,
+  "remy_page": "Boss Rush",
+  "remy_match": "exact_norm",
+  "phash_8": "85475a950d7b469b",
+  "phash_16": "855047ea5ac395550d2769aa46aa9b0cff91ec9f6d2f28871c2ca0b4a257d8df",
+  "id_status": "official",
+  "availability": "standard",
+  "created_at": "",
+  "updated_at": "2026-11-24",
+  "deleted_at": ""
+ },
+ {
+  "id": "bOOIQqdDllioii8Ill98dIQbbloQ8Do1",
+  "title": "HORIZON BEATZ",
+  "artist": "SOUND HOLIC feat. Nana Takahashi",
+  "version_current": "WORLD",
+  "version_remy_first_ddr": "WORLD",
+  "bpm": "152",
+  "length": "2:04",
+  "levels": {
+   "sp_beginner": 3,
+   "sp_basic": 6,
+   "sp_difficult": 12,
+   "sp_expert": 16,
+   "sp_challenge": null,
+   "dp_basic": 6,
+   "dp_difficult": 12,
+   "dp_expert": 16,
+   "dp_challenge": null
+  },
+  "notecounts": {
+   "sp_beginner": {
+    "notes": 63,
+    "freeze": 7
+   },
+   "sp_basic": {
+    "notes": 211,
+    "freeze": 7
+   },
+   "sp_difficult": {
+    "notes": 425,
+    "freeze": 12
+   },
+   "sp_expert": {
+    "notes": 759,
+    "freeze": 5
+   },
+   "sp_challenge": {
+    "notes": "-",
+    "freeze": "-",
+    "shock": "-"
+   },
+   "dp_basic": {
+    "notes": 200,
+    "freeze": 7
+   },
+   "dp_difficult": {
+    "notes": 420,
+    "freeze": 12
+   },
+   "dp_expert": {
+    "notes": 721,
+    "freeze": 4
+   },
+   "dp_challenge": {
+    "notes": "-",
+    "freeze": "-",
+    "shock": "-"
+   }
+  },
+  "in_official_list": false,
+  "in_current_dataset": true,
+  "remy_page": "HORIZON BEATZ",
+  "remy_match": "exact_norm",
+  "phash_8": "958136a9daf527c8",
+  "phash_16": "945580583697a875da23f4362695c8b0179bd2f666a48e78e0dd33d55bce6ae8",
+  "id_status": "official",
+  "availability": "standard",
+  "created_at": "",
+  "updated_at": "",
+  "deleted_at": ""
+ },
+ {
+  "id": "DD6olq00PD91odbO9QbldDb0bQ18oqo1",
+  "title": "Pierce The Sky",
+  "artist": "JAKAZiD feat. K.N.",
+  "version_current": "X2",
+  "version_remy_first_ddr": "X2",
+  "bpm": "85-173 (DanceDanceRevolution), 170 (jubeat)",
+  "length": "1:45",
+  "levels": {
+   "sp_beginner": 3,
+   "sp_basic": 8,
+   "sp_difficult": 11,
+   "sp_expert": 14,
+   "sp_challenge": 16,
+   "dp_basic": 8,
+   "dp_difficult": 11,
+   "dp_expert": 14,
+   "dp_challenge": 16
+  },
+  "notecounts": {
+   "sp_beginner": {
+    "notes": 79,
+    "freeze": 0
+   },
+   "sp_basic": {
+    "notes": 275,
+    "freeze": 21
+   },
+   "sp_difficult": {
+    "notes": 361,
+    "freeze": 35
+   },
+   "sp_expert": {
+    "notes": 476,
+    "freeze": 24
+   },
+   "sp_challenge": {
+    "notes": 598,
+    "freeze": 15,
+    "shock": 0
+   },
+   "dp_basic": {
+    "notes": 273,
+    "freeze": 19
+   },
+   "dp_difficult": {
+    "notes": 360,
+    "freeze": 33
+   },
+   "dp_expert": {
+    "notes": 470,
+    "freeze": 17
+   },
+   "dp_challenge": {
+    "notes": 573,
+    "freeze": 15,
+    "shock": 0
+   }
+  },
+  "in_official_list": true,
+  "in_current_dataset": true,
+  "remy_page": "Pierce The Sky",
+  "remy_match": "exact_norm",
+  "phash_8": "95b4624a3d49f497",
+  "phash_16": "9584b6b762684ae73dfc49e8f4079789e406191f1ff0e04c1bb965b0e31b30f3",
+  "id_status": "official",
+  "availability": "standard",
+  "created_at": "",
+  "updated_at": "",
+  "deleted_at": ""
+ },
+ {
+  "id": "0i8idqoQ8lOIi6qOPO0DOOi8OlPq10D8",
+  "title": "Roll the Dice",
+  "artist": "lapix",
+  "version_current": "WORLD",
+  "version_remy_first_ddr": "WORLD",
+  "bpm": "165",
+  "length": "2:05",
+  "levels": {
+   "sp_beginner": 4,
+   "sp_basic": 8,
+   "sp_difficult": 12,
+   "sp_expert": 15,
+   "sp_challenge": 17,
+   "dp_basic": 8,
+   "dp_difficult": 12,
+   "dp_expert": 15,
+   "dp_challenge": 17
+  },
+  "notecounts": {
+   "sp_beginner": {
+    "notes": 116,
+    "freeze": 2
+   },
+   "sp_basic": {
+    "notes": 255,
+    "freeze": 27
+   },
+   "sp_difficult": {
+    "notes": 451,
+    "freeze": 20
+   },
+   "sp_expert": {
+    "notes": 658,
+    "freeze": 20
+   },
+   "sp_challenge": {
+    "notes": 813,
+    "freeze": 18,
+    "shock": 0
+   },
+   "dp_basic": {
+    "notes": 255,
+    "freeze": 27
+   },
+   "dp_difficult": {
+    "notes": 443,
+    "freeze": 20
+   },
+   "dp_expert": {
+    "notes": 640,
+    "freeze": 20
+   },
+   "dp_challenge": {
+    "notes": 788,
+    "freeze": 18,
+    "shock": 0
+   }
+  },
+  "in_official_list": false,
+  "in_current_dataset": true,
+  "remy_page": "Roll the Dice",
+  "remy_match": "exact_norm",
+  "phash_8": "c4e93b726e1c3c23",
+  "phash_16": "c413e9043ba4720a6e435cca3cdb233125b48cdf26d9667966bb992ed36665b9",
+  "id_status": "official",
+  "availability": "standard",
+  "created_at": "",
+  "updated_at": "",
+  "deleted_at": ""
+ },
+ {
+  "id": "remy-steps-for-victory-u1-heavy-metal-edition",
+  "id_status": "provisional",
+  "title": "Steps for Victory (U1 Heavy Metal Edition)",
+  "artist": "",
+  "version_current": null,
+  "version_remy_first_ddr": "WORLD",
+  "bpm": "210",
+  "length": "1:57",
+  "levels": {
+   "sp_beginner": 4,
+   "sp_basic": 7,
+   "sp_difficult": 14,
+   "sp_expert": 16,
+   "sp_challenge": 18,
+   "dp_basic": 7,
+   "dp_difficult": 14,
+   "dp_expert": 16,
+   "dp_challenge": 18
+  },
+  "notecounts": {
+   "sp_beginner": {
+    "notes": 113,
+    "freeze": 4
+   },
+   "sp_basic": {
+    "notes": 236,
+    "freeze": 2
+   },
+   "sp_difficult": {
+    "notes": 471,
+    "freeze": 15
+   },
+   "sp_expert": {
+    "notes": 594,
+    "freeze": 13
+   },
+   "sp_challenge": {
+    "notes": 695,
+    "freeze": 19,
+    "shock": 0
+   },
+   "dp_basic": {
+    "notes": 236,
+    "freeze": 2
+   },
+   "dp_difficult": {
+    "notes": 463,
+    "freeze": 15
+   },
+   "dp_expert": {
+    "notes": 597,
+    "freeze": 13
+   },
+   "dp_challenge": {
+    "notes": 675,
+    "freeze": 19,
+    "shock": 0
+   }
+  },
+  "in_official_list": false,
+  "in_current_dataset": false,
+  "remy_page": "Steps for Victory (U1 Heavy Metal Edition)",
+  "remy_match": "remy_only",
+  "phash_8": null,
+  "phash_16": null,
+  "availability": "standard",
+  "created_at": "2026-11-24",
+  "updated_at": "",
+  "deleted_at": ""
+ },
+ {
+  "id": "bd9dlo8IQOOdQD0dlPQ0bqqdOdl90ol0",
+  "title": "THE SAFARI (STARDOM Remix)",
+  "artist": "BEMANI Sound Team \"SYUNN\"",
+  "version_current": "WORLD",
+  "version_remy_first_ddr": "WORLD",
+  "bpm": "134",
+  "length": "1:47",
+  "levels": {
+   "sp_beginner": 3,
+   "sp_basic": 6,
+   "sp_difficult": 11,
+   "sp_expert": 13,
+   "sp_challenge": 16,
+   "dp_basic": 6,
+   "dp_difficult": 11,
+   "dp_expert": 13,
+   "dp_challenge": 16
+  },
+  "notecounts": {
+   "sp_beginner": {
+    "notes": 90,
+    "freeze": 10
+   },
+   "sp_basic": {
+    "notes": 180,
+    "freeze": 22
+   },
+   "sp_difficult": {
+    "notes": 283,
+    "freeze": 28
+   },
+   "sp_expert": {
+    "notes": 403,
+    "freeze": 16
+   },
+   "sp_challenge": {
+    "notes": 533,
+    "freeze": 20,
+    "shock": 0
+   },
+   "dp_basic": {
+    "notes": 178,
+    "freeze": 22
+   },
+   "dp_difficult": {
+    "notes": 277,
+    "freeze": 28
+   },
+   "dp_expert": {
+    "notes": 399,
+    "freeze": 16
+   },
+   "dp_challenge": {
+    "notes": 519,
+    "freeze": 20,
+    "shock": 0
+   }
+  },
+  "in_official_list": true,
+  "in_current_dataset": true,
+  "remy_page": "THE SAFARI (STARDOM Remix)",
+  "remy_match": "exact_norm",
+  "phash_8": "d2e90ad2359fda81",
+  "phash_16": "d255e9550ac7d29d35059f2dda1d81cd7b77502222bcd5a25cea75aa708a5a6a",
+  "id_status": "official",
+  "availability": "standard",
+  "created_at": "",
+  "updated_at": "",
+  "deleted_at": ""
+ }
+]

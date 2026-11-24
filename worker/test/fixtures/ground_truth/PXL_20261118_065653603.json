@@ -1,0 +1,27 @@
+{
+  "song_title": "Roll the Dice",
+  "play_style": "SP",
+  "is_versus": false,
+  "player_1": {
+    "dancer_name": "4TUNA",
+    "difficulty": "CHALLENGE",
+    "level": 17,
+    "score": 995740,
+    "ex_score": 2350,
+    "rank": "AAA",
+    "clear_lamp": "GFC",
+    "flare_rank": "IX",
+    "flare_skill": null,
+    "max_combo": 813,
+    "marvelous": 676,
+    "perfect": 131,
+    "great": 6,
+    "good": 0,
+    "ok": 18,
+    "miss": 0,
+    "fast_count": 63,
+    "slow_count": 74
+  },
+  "player_2": null,
+  "jacket_bbox": null
+}

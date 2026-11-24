@@ -1,0 +1,27 @@
+{
+  "song_title": "Boss Rush",
+  "play_style": "SP",
+  "is_versus": false,
+  "player_1": {
+    "dancer_name": "4TUNA",
+    "difficulty": "CHALLENGE",
+    "level": 18,
+    "score": 944490,
+    "ex_score": 1912,
+    "rank": "AA",
+    "clear_lamp": "CLEAR",
+    "flare_rank": "III",
+    "flare_skill": null,
+    "max_combo": 195,
+    "marvelous": 447,
+    "perfect": 194,
+    "great": 66,
+    "good": 1,
+    "ok": 39,
+    "miss": 13,
+    "fast_count": 194,
+    "slow_count": 67
+  },
+  "player_2": null,
+  "jacket_bbox": null
+}
