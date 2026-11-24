@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { Score } from '../lib/api'
 import { exRatePercent } from '../lib/stats'
+import { DiffBadge } from './DiffBadge'
 
 export function fmtDate(ms: number): string {
   const d = new Date(ms)
@@ -17,7 +18,7 @@ export function ScoreList({ items }: { items: Score[] }) {
             <div className="score-row-main">
               <span className="score-row-title">{s.song_title || s.raw_title || '(曲名不明)'}</span>
               <span className="muted">
-                {s.play_style} {s.difficulty} Lv.{s.level ?? '?'} ・ {fmtDate(s.played_at)}
+                <DiffBadge style={s.play_style} difficulty={s.difficulty} level={s.level} /> ・ {fmtDate(s.played_at)}
               </span>
             </div>
             <div className="score-row-right">

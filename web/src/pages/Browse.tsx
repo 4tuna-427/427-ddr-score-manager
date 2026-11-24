@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { browseCharts, getBrowseFacets, type BrowseItem } from '../lib/api'
 import { exRatePercent } from '../lib/stats'
 import { fmtDate } from '../components/ScoreList'
+import { DiffBadge } from '../components/DiffBadge'
 
 const DIFFS = ['BEGINNER', 'BASIC', 'DIFFICULT', 'EXPERT', 'CHALLENGE']
 const PAGE = 50
@@ -13,6 +14,7 @@ export function BrowsePage() {
   const [difficulty, setDifficulty] = useState('')
   const [level, setLevel] = useState('')
   const [version, setVersion] = useState('')
+  const [category, setCategory] = useState('')
   const [played, setPlayed] = useState('')
   const [sort, setSort] = useState('level')
   const [versions, setVersions] = useState<string[]>([])
@@ -35,7 +37,7 @@ export function BrowsePage() {
         const res = await browseCharts({
           q, style, difficulty,
           level: level ? Number(level) : undefined,
-          version, played, sort,
+          version, category, played, sort,
           limit: PAGE, offset,
         })
         if (req !== reqRef.current) return
@@ -48,7 +50,7 @@ export function BrowsePage() {
         if (req === reqRef.current) setLoading(false)
       }
     },
-    [q, style, difficulty, level, version, played, sort],
+    [q, style, difficulty, level, version, category, played, sort],
   )
 
   // Refetch from the top whenever a filter changes (text input debounced).
@@ -80,6 +82,12 @@ export function BrowsePage() {
             <option value="">バージョンすべて</option>
             {versions.map((v) => <option key={v} value={v}>{v}</option>)}
           </select>
+          <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="カテゴリ">
+            <option value="">カテゴリすべて</option>
+            <option value="CLASSIC">CLASSIC（〜X3）</option>
+            <option value="WHITE">WHITE（2013〜A）</option>
+            <option value="GOLD">GOLD（A20〜）</option>
+          </select>
           <select value={played} onChange={(e) => setPlayed(e.target.value)} aria-label="プレイ状況">
             <option value="">プレイ状況すべて</option>
             <option value="played">プレイ済み</option>
@@ -105,7 +113,8 @@ export function BrowsePage() {
                 <div className="score-row-main">
                   <span className="score-row-title">{it.title}</span>
                   <span className="muted">
-                    {it.artist || ''} ・ {it.play_style} {it.difficulty} Lv.{it.level ?? '?'}
+                    {it.category && <span className={`badge cat-${it.category.toLowerCase()}`}>{it.category}</span>}{' '}
+                    {it.artist || ''} ・ <DiffBadge style={it.play_style} difficulty={it.difficulty} level={it.level} />
                     {it.bpm ? ` ・ BPM ${it.bpm}` : ''}{it.version ? ` ・ ${it.version}` : ''}
                   </span>
                   {it.plays != null && it.last_played != null && (

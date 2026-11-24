@@ -159,6 +159,8 @@ export interface ChartHistory {
     difficulty: string
     level: number | null
     max_ex?: number | null
+    version?: string | null
+    category?: string | null
     title?: string | null
     song_title?: string | null
     artist?: string | null
@@ -196,11 +198,12 @@ export interface BrowseItem {
   best_ex_score?: number | null
   best_rank?: string | null
   best_lamp?: string | null
+  category?: string | null
 }
 
 export function browseCharts(params: {
   q?: string; style?: string; difficulty?: string; level?: number
-  version?: string; played?: string; sort?: string; limit?: number; offset?: number
+  version?: string; category?: string; played?: string; sort?: string; limit?: number; offset?: number
 }): Promise<{ items: BrowseItem[]; total: number }> {
   const qs = new URLSearchParams()
   if (params.q) qs.set('q', params.q)
@@ -208,6 +211,7 @@ export function browseCharts(params: {
   if (params.difficulty) qs.set('difficulty', params.difficulty)
   if (params.level != null) qs.set('level', String(params.level))
   if (params.version) qs.set('version', params.version)
+  if (params.category) qs.set('category', params.category)
   if (params.played) qs.set('played', params.played)
   if (params.sort) qs.set('sort', params.sort)
   qs.set('limit', String(params.limit ?? 50))
@@ -215,7 +219,7 @@ export function browseCharts(params: {
   return request(`/api/browse?${qs.toString()}`)
 }
 
-export function getBrowseFacets(): Promise<{ versions: string[] }> {
+export function getBrowseFacets(): Promise<{ versions: string[]; categories: Record<string, number> }> {
   return request('/api/browse/facets')
 }
 

@@ -41,14 +41,14 @@ export function SettingsPage() {
           APIベースURL（空なら相対 /api）
           <input type="url" value={base} onChange={(e) => setBase(e.target.value)} placeholder="https://your-worker.example.workers.dev" />
         </label>
-        <button type="button" onClick={save}>保存</button>
+        <button type="button" className="primary" onClick={save}>保存</button>
         {saved && <span className="muted">保存しました</span>}
       </div>
       <p className="muted">トークンとベースURLはこの端末の localStorage にのみ保存されます。</p>
       <div className="card form">
         <h2>データのバックアップ</h2>
         <p className="muted">登録済みスコア全件を JSON ファイルでダウンロードします。</p>
-        <button type="button" onClick={doExport}>スコアをエクスポート（JSON）</button>
+        <button type="button" className="primary" onClick={doExport}>スコアをエクスポート（JSON）</button>
         {exportMsg && <span className="muted">{exportMsg}</span>}
       </div>
     </div>

@@ -376,3 +376,36 @@ export function computeDayUpdates<T extends DayScoreRow>(
   }
   return updates.sort((a, b) => (b.diff ?? Number.MAX_SAFE_INTEGER) - (a.diff ?? Number.MAX_SAFE_INTEGER));
 }
+
+export type SongCategory = "CLASSIC" | "WHITE" | "GOLD";
+
+/**
+ * Song category by its version folder (the version the song belongs to,
+ * i.e. its debut folder — NOT when a chart was added later):
+ *   CLASSIC: 1st .. X3 VS 2ndMIX
+ *   WHITE:   (2013) .. A
+ *   GOLD:    A20 .. WORLD
+ * Stored version strings come in two spellings (dataset: "X3 vs 2nd",
+ * "Extreme", "MAX2"; RemyWiki: "X3", "EXTREME", "DDRMAX2"), so matching is
+ * case-insensitive with synonyms. Unknown versions return null.
+ */
+const CATEGORY_BY_VERSION = new Map<string, SongCategory>([
+  ...["1ST", "2ND", "3RD", "4TH", "5TH", "MAX", "DDRMAX", "MAX2", "DDRMAX2",
+    "EXTREME", "SUPERNOVA", "SUPERNOVA2", "X", "X2", "X3", "X3 VS 2ND", "X3 VS 2NDMIX"]
+    .map((v) => [v, "CLASSIC"] as [string, SongCategory]),
+  ...["2013", "2014", "A"].map((v) => [v, "WHITE"] as [string, SongCategory]),
+  ...["A20", "A20 PLUS", "A3", "WORLD"].map((v) => [v, "GOLD"] as [string, SongCategory]),
+]);
+
+export function songCategory(version: string | null | undefined): SongCategory | null {
+  if (!version) return null;
+  return CATEGORY_BY_VERSION.get(version.trim().toUpperCase()) ?? null;
+}
+
+/** Exact stored spellings per category, for SQL IN() filters on songs.version. */
+export const CATEGORY_VERSION_SPELLINGS: Record<SongCategory, string[]> = {
+  CLASSIC: ["1st", "2nd", "3rd", "4th", "5th", "MAX", "DDRMAX", "MAX2", "DDRMAX2",
+    "Extreme", "EXTREME", "SuperNOVA", "SuperNOVA2", "X", "X2", "X3", "X3 vs 2nd"],
+  WHITE: ["2013", "2014", "A"],
+  GOLD: ["A20", "A20 PLUS", "A3", "WORLD"],
+};

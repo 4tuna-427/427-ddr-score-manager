@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import type { AnalyzeResult } from '../lib/api'
 import { exRatePercent } from '../lib/stats'
 import { JudgeBar } from './JudgeBar'
+import { DiffBadge } from './DiffBadge'
 
 export function ResultCard({ result }: { result: AnalyzeResult }) {
   const s = result.score
@@ -11,9 +12,7 @@ export function ResultCard({ result }: { result: AnalyzeResult }) {
     <div className="card result-card">
       <div className="result-head">
         <strong>{title}</strong>
-        <span className="muted">
-          {s.play_style} {s.difficulty} Lv.{s.level ?? '?'}
-        </span>
+        <DiffBadge style={s.play_style} difficulty={s.difficulty} level={s.level} />
       </div>
       <div className="result-score">{s.score.toLocaleString()}</div>
       {prev ? (

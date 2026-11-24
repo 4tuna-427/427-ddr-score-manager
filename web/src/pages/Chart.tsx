@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getChartHistory, type ChartHistory } from '../lib/api'
 import { ScoreList, fmtDate } from '../components/ScoreList'
+import { DiffBadge } from '../components/DiffBadge'
 
 export function ChartPage() {
   const { chartId } = useParams<{ chartId: string }>()
@@ -33,7 +34,8 @@ export function ChartPage() {
     <div>
       <h1>{title}</h1>
       <p className="muted">
-        {chart.artist || ''} / {chart.play_style} {chart.difficulty} Lv.{chart.level ?? '?'}
+        {chart.category && <span className={`badge cat-${chart.category.toLowerCase()}`}>{chart.category}</span>}{' '}
+        {chart.artist || ''} / <DiffBadge style={chart.play_style} difficulty={chart.difficulty} level={chart.level} />{chart.version ? ` ・ ${chart.version}` : ''}
       </p>
       <div className="card">
         <h2>スコア遷移</h2>
@@ -46,7 +48,7 @@ export function ChartPage() {
               <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
               <YAxis domain={['dataMin - 5000', 1000000]} tick={{ fontSize: 11 }} width={64} />
               <Tooltip />
-              <Line type="monotone" dataKey="score" name="スコア" stroke="#2563eb" strokeWidth={2} dot />
+              <Line type="monotone" dataKey="score" name="スコア" stroke="#0b7a43" strokeWidth={2} dot />
             </LineChart>
           </ResponsiveContainer>
         )}

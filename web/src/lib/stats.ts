@@ -15,11 +15,11 @@ export interface JudgeSlice {
 }
 
 const JUDGES: { key: JudgeSlice['key']; label: string; color: string }[] = [
-  { key: 'marvelous', label: 'Marvelous', color: '#ffd94d' },
-  { key: 'perfect', label: 'Perfect', color: '#ff9f43' },
-  { key: 'great', label: 'Great', color: '#54c98a' },
-  { key: 'good', label: 'Good', color: '#54a8d8' },
-  { key: 'miss', label: 'Miss', color: '#9a9aa5' },
+  { key: 'marvelous', label: 'Marvelous', color: '#f2b705' },
+  { key: 'perfect', label: 'Perfect', color: '#ff5d8f' },
+  { key: 'great', label: 'Great', color: '#2fbf71' },
+  { key: 'good', label: 'Good', color: '#3f8cff' },
+  { key: 'miss', label: 'Miss', color: '#b9c0c7' },
 ]
 
 /**

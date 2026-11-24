@@ -12,6 +12,10 @@ export default function App() {
   return (
     <QueueProvider>
       <BrowserRouter>
+        <header className="app-header">
+          <div className="wordmark">DDR <em>SCORE</em> MANAGER</div>
+          <div className="bar" />
+        </header>
         <main className="container">
           <Routes>
             <Route path="/" element={<HomePage />} />

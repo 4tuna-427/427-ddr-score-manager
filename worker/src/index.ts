@@ -10,6 +10,9 @@ import {
   jstDateString,
   jstDayStartMs,
   computeDayUpdates,
+  songCategory,
+  CATEGORY_VERSION_SPELLINGS,
+  type SongCategory,
   type ChartRow,
   type Extraction,
   type PlayerExtraction,
@@ -490,7 +493,15 @@ app.get("/api/browse/facets", async (c) => {
   const { results } = await c.env.DB
     .prepare("SELECT DISTINCT version FROM songs WHERE version IS NOT NULL AND version <> '' ORDER BY version")
     .all<{ version: string }>();
-  return c.json({ versions: results.map((r) => r.version) });
+  const { results: verCounts } = await c.env.DB
+    .prepare("SELECT version, COUNT(*) AS n FROM songs GROUP BY version")
+    .all<{ version: string | null; n: number }>();
+  const categories: Record<SongCategory, number> = { CLASSIC: 0, WHITE: 0, GOLD: 0 };
+  for (const r of verCounts) {
+    const cat = songCategory(r.version);
+    if (cat) categories[cat] += r.n;
+  }
+  return c.json({ versions: results.map((r) => r.version), categories });
 });
 
 app.get("/api/browse", async (c) => {
@@ -500,6 +511,8 @@ app.get("/api/browse", async (c) => {
   const levelRaw = parseInt(c.req.query("level") ?? "", 10);
   const level = Number.isNaN(levelRaw) ? null : levelRaw;
   const version = c.req.query("version") ?? "";
+  const categoryRaw = (c.req.query("category") ?? "").toUpperCase();
+  const category = (["CLASSIC", "WHITE", "GOLD"] as const).find((x) => x === categoryRaw) ?? null;
   const played = c.req.query("played") ?? "";
   const sort = c.req.query("sort") ?? "level";
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "50", 10) || 50, 1), 200);
@@ -515,6 +528,11 @@ app.get("/api/browse", async (c) => {
   if (difficulty) { where.push("c.difficulty = ?"); binds.push(difficulty); }
   if (level != null) { where.push("c.level = ?"); binds.push(level); }
   if (version) { where.push("s.version = ?"); binds.push(version); }
+  if (category) {
+    const spellings = CATEGORY_VERSION_SPELLINGS[category];
+    where.push(`s.version IN (${spellings.map(() => "?").join(", ")})`);
+    binds.push(...spellings);
+  }
   if (played === "played") where.push("pb.plays IS NOT NULL");
   if (played === "unplayed") where.push("pb.plays IS NULL");
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -565,6 +583,7 @@ app.get("/api/browse", async (c) => {
       if (d) Object.assign(r, { best_ex_score: d.ex_score, best_rank: d.rank, best_lamp: d.clear_lamp });
     }
   }
+  for (const r of rows) r.category = songCategory((r as { version?: string | null }).version);
   return c.json({ items: rows, total: totalRow?.n ?? 0 });
 });
 
@@ -573,12 +592,13 @@ app.get("/api/charts/:chart_id/history", async (c) => {
   const chartId = c.req.param("chart_id");
   const chartRow = await c.env.DB
     .prepare(
-      `SELECT charts.*, songs.title AS song_title, songs.artist AS artist
+      `SELECT charts.*, songs.title AS song_title, songs.artist AS artist, songs.version AS version
        FROM charts JOIN songs ON songs.song_id = charts.song_id WHERE charts.chart_id = ?`,
     )
     .bind(chartId)
     .first();
   if (!chartRow) return c.json({ error: "chart not found" }, 404);
+  (chartRow as Record<string, unknown>).category = songCategory((chartRow as { version?: string | null }).version);
   const { results } = await c.env.DB
     .prepare("SELECT * FROM scores WHERE chart_id = ? ORDER BY played_at ASC")
     .bind(chartId)

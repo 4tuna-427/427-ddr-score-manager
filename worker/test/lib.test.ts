@@ -188,3 +188,24 @@ test("computeDayUpdates picks per-chart day best and diffs vs previous best", as
   assert.equal(c2.is_new, true);
   assert.equal(c2.prev_best, null);
 });
+
+test("songCategory classifies by version folder with spelling variants", async () => {
+  const { songCategory } = await import("../src/lib");
+  assert.equal(songCategory("1st"), "CLASSIC");
+  assert.equal(songCategory("X3 vs 2nd"), "CLASSIC");
+  assert.equal(songCategory("X3"), "CLASSIC");
+  assert.equal(songCategory("Extreme"), "CLASSIC");
+  assert.equal(songCategory("EXTREME"), "CLASSIC");
+  assert.equal(songCategory("DDRMAX2"), "CLASSIC");
+  assert.equal(songCategory("SuperNOVA2"), "CLASSIC");
+  assert.equal(songCategory("2013"), "WHITE");
+  assert.equal(songCategory("2014"), "WHITE");
+  assert.equal(songCategory("A"), "WHITE");
+  assert.equal(songCategory("A20"), "GOLD");
+  assert.equal(songCategory("A20 PLUS"), "GOLD");
+  assert.equal(songCategory("A3"), "GOLD");
+  assert.equal(songCategory("WORLD"), "GOLD");
+  assert.equal(songCategory(null), null);
+  assert.equal(songCategory(""), null);
+  assert.equal(songCategory("SOMETHING ELSE"), null);
+});

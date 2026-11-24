@@ -92,7 +92,7 @@ export function HomePage() {
           ))}
         </ul>
         {items.length > 0 && (
-          <button type="button" onClick={() => processNow()}>今すぐ再送</button>
+          <button type="button" className="primary" onClick={() => processNow()}>今すぐ再送</button>
         )}
       </div>
 
