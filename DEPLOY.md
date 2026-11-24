@@ -1,0 +1,79 @@
+# デプロイ手順（Phase 1 MVP）
+
+構成: Cloudflare Workers（API）＋ D1 ＋ Cloudflare Pages（PWA）。すべて無料枠・クレカ不要。
+所要時間の目安: 30分程度。前提: Node.js と GitHub アカウント、Cloudflare アカウント。
+
+## 0. 準備
+```bash
+cd app/worker && npm install
+cd ../web && npm install
+npx wrangler login   # worker フォルダで実行、ブラウザで Cloudflare にログイン
+```
+
+## 1. D1 データベース作成
+```bash
+cd app/worker
+npx wrangler d1 create ddr-score-db
+```
+表示された `database_id` を `worker/wrangler.toml` の `database_id = "00000000-..."` と差し替える。
+
+## 2. スキーマと初期マスタの投入
+```bash
+npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0001_init.sql
+```
+初期マスタ（1,485曲・ノーツ数つき）はシードSQLを使う。ファイルが大きいので分割して投入する:
+```bash
+cd ../scripts
+python3 - <<'EOF'
+import pathlib
+stmts=[l for l in pathlib.Path("seed_master.sql").read_text().splitlines() if l.startswith("INSERT")]
+pathlib.Path("/tmp/chunks").mkdir(exist_ok=True)
+for i in range(0,len(stmts),800):
+    pathlib.Path(f"/tmp/chunks/c{i//800:02d}.sql").write_text("\n".join(stmts[i:i+800])+"\n")
+print(len(stmts),"statements")
+EOF
+for f in /tmp/chunks/c*.sql; do (cd ../worker && npx wrangler d1 execute ddr-score-db --remote --file "$f"); done
+```
+確認: `npx wrangler d1 execute ddr-score-db --remote --command "SELECT count(*) FROM songs"` が 1485 になればOK。
+
+## 3. シークレット登録（worker フォルダ）
+```bash
+npx wrangler secret put API_TOKEN        # 自分で決めた任意の長い文字列。PWAの設定画面に入れるものと同じにする
+npx wrangler secret put GEMINI_API_KEY   # AI Studio で発行した無料枠キー（専用プロジェクトのもの）
+npx wrangler secret put MY_DANCER_NAME   # 4TUNA
+```
+
+## 4. API デプロイ
+```bash
+npx wrangler deploy
+```
+表示された URL（例: `https://ddr-score-api.<account>.workers.dev`）を控える。
+
+動作確認:
+```bash
+curl https://ddr-score-api.<account>.workers.dev/api/health
+curl -H "X-API-Token: <API_TOKEN>" "https://ddr-score-api.<account>.workers.dev/api/songs?q=Roll"
+```
+
+## 5. フロントエンド（Pages）
+1. この `app/` を GitHub リポジトリに push する（例: `ddr-score-manager`）
+2. Cloudflare ダッシュボード → Workers & Pages → Create → Pages → Connect to Git でリポジトリを選択
+3. ビルド設定: Root directory = `web`、Build command = `npm run build`、Output = `dist`、Framework preset = Vite
+4. デプロイされた URL をスマホで開く
+
+## 6. 初期設定（スマホ）
+1. PWA の「設定」タブで、APIベースURL に手順4の Workers URL、APIトークンに手順3の API_TOKEN を入れて保存
+2. Chrome のメニューから「アプリをインストール」でホーム画面に追加（Share Target はインストール状態でのみ有効）
+3. 試しにリザルト写真を1枚アップロードし、登録結果カードが出ること・履歴に残ることを確認
+
+## 7. マスタの更新
+- 楽曲マスタの定期更新は API の同期エンドポイントで可能:
+  `curl -X POST -H "X-API-Token: <API_TOKEN>" https://<workers-url>/api/admin/sync -d '{}'`
+  既定では配信中の v1 songs.json を取得し、レベル・曲名を最新化する（ノーツ数は保持される）。
+- ノーツ数つきの最新シードが必要になったら、`scripts/make_seed.py` に最新の songs_v2.json を渡して再生成し、手順2の分割投入を再実行する。
+
+## 注意・既知の制限
+- Share Target は Android Chrome で PWA をインストールした場合のみ共有メニューに出る。ホーム画面ショートカットだけでは出ない
+- 画像の自動送信（MacroDroid）は Phase 2。現状は共有メニューまたはアプリ内アップロード
+- フレアスキルの数値は詳細リザルト画面に表示されないため未対応（Phase 0 で確認済み）
+- Gemini 無料枠では送信画像が Google の製品改善に使われ得る（利用可否は大西確認済み）

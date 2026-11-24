@@ -1,0 +1,19 @@
+name = "ddr-score-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Secrets (do NOT put values in this file). Set them with:
+#   wrangler secret put API_TOKEN
+#   wrangler secret put GEMINI_API_KEY
+#   wrangler secret put MY_DANCER_NAME
+
+[vars]
+GEMINI_MODEL = "gemini-3.5-flash-lite"
+MASTER_URL = "https://4tuna-427.github.io/ddr-song-data/songs.json"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ddr-score-db"
+# Replace with the real database_id after `wrangler d1 create ddr-score-db`.
+database_id = "c5a4a18e-bb5e-43b1-9ed7-f4c849df3b2b"
+migrations_dir = "../migrations"

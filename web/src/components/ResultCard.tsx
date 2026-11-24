@@ -1,0 +1,33 @@
+import { Link } from 'react-router-dom'
+import type { AnalyzeResult } from '../lib/api'
+
+export function ResultCard({ result }: { result: AnalyzeResult }) {
+  const s = result.score
+  const prev = result.previous
+  const title = s.song_title || s.raw_title || '(曲名不明)'
+  return (
+    <div className="card result-card">
+      <div className="result-head">
+        <strong>{title}</strong>
+        <span className="muted">
+          {s.play_style} {s.difficulty} Lv.{s.level ?? '?'}
+        </span>
+      </div>
+      <div className="result-score">{s.score.toLocaleString()}</div>
+      {prev ? (
+        <div className={prev.diff >= 0 ? 'diff up' : 'diff down'}>
+          前回 {prev.score.toLocaleString()}（{prev.diff >= 0 ? '+' : ''}
+          {prev.diff.toLocaleString()}）
+        </div>
+      ) : (
+        <div className="muted">この譜面の初記録</div>
+      )}
+      {s.ex_score != null && <div className="muted">EX {s.ex_score.toLocaleString()}</div>}
+      {s.needs_review === 1 && (
+        <div className="warn">⚠ 要確認：読み取り値が検算と一致しませんでした。タップして確認・修正してください。</div>
+      )}
+      {!s.chart_id && <div className="warn">⚠ 曲を特定できませんでした。詳細から曲を検索して紐付けてください。</div>}
+      <Link to={`/scores/${s.id}`}>詳細を見る</Link>
+    </div>
+  )
+}
