@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { fetchExportBlob, getApiBaseUrl, getApiToken, setApiBaseUrl, setApiToken } from '../lib/api'
+import { getThemeMode, setThemeMode, type ThemeMode } from '../lib/theme'
 
 export function SettingsPage() {
   const [token, setToken] = useState(getApiToken())
   const [base, setBase] = useState(getApiBaseUrl())
+  const [theme, setTheme] = useState<ThemeMode>(getThemeMode())
   const [saved, setSaved] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
 
@@ -45,6 +47,22 @@ export function SettingsPage() {
         {saved && <span className="muted">保存しました</span>}
       </div>
       <p className="muted">トークンとベースURLはこの端末の localStorage にのみ保存されます。</p>
+      <div className="card">
+        <h2>テーマ</h2>
+        <div className="segmented">
+          {([['auto', '自動'], ['light', 'ライト'], ['dark', 'ダーク']] as [ThemeMode, string][]).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              className={theme === mode ? 'active' : ''}
+              onClick={() => { setTheme(mode); setThemeMode(mode) }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="muted">「自動」は端末のダークモード設定に合わせます。</p>
+      </div>
       <div className="card form">
         <h2>データのバックアップ</h2>
         <p className="muted">登録済みスコア全件を JSON ファイルでダウンロードします。</p>

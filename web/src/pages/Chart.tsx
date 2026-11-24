@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getChartHistory, type ChartHistory } from '../lib/api'
+import { useIsDark } from '../lib/theme'
 import { ScoreList, fmtDate } from '../components/ScoreList'
 import { DiffBadge } from '../components/DiffBadge'
 
 export function ChartPage() {
+  const dark = useIsDark()
   const { chartId } = useParams<{ chartId: string }>()
   const [data, setData] = useState<ChartHistory | null>(null)
   const [error, setError] = useState('')
@@ -44,11 +46,11 @@ export function ChartPage() {
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#2b3a30' : '#d7e2da'} />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
               <YAxis domain={['dataMin - 5000', 1000000]} tick={{ fontSize: 11 }} width={64} />
-              <Tooltip />
-              <Line type="monotone" dataKey="score" name="スコア" stroke="#0b7a43" strokeWidth={2} dot />
+              <Tooltip contentStyle={dark ? { background: '#171f1a', border: '1px solid #2b3a30', color: '#e8f1ea' } : undefined} />
+              <Line type="monotone" dataKey="score" name="スコア" stroke={dark ? '#6ddc99' : '#0b7a43'} strokeWidth={2} dot />
             </LineChart>
           </ResponsiveContainer>
         )}

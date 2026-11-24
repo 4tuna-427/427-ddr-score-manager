@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getStats, type AchievementBucket, type StatsResponse } from '../lib/api'
+import { useIsDark } from '../lib/theme'
 
 function LampCounts({ b }: { b: AchievementBucket }) {
   return (
@@ -25,6 +26,7 @@ function Progress({ played, total }: { played: number; total: number }) {
 }
 
 export function StatsPage() {
+  const dark = useIsDark()
   const [data, setData] = useState<StatsResponse | null>(null)
   const [error, setError] = useState('')
   const [style, setStyle] = useState<'SP' | 'DP'>('SP')
@@ -97,12 +99,12 @@ export function StatsPage() {
         <h3>月別推移（直近12か月）</h3>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={monthly} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#2b3a30' : '#d7e2da'} />
             <XAxis dataKey="label" />
             <YAxis allowDecimals={false} />
-            <Tooltip />
+            <Tooltip contentStyle={dark ? { background: '#171f1a', border: '1px solid #2b3a30', color: '#e8f1ea' } : undefined} />
             <Bar dataKey="plays" name="プレイ数" fill="#51dd95" />
-            <Bar dataKey="pb_updates" name="自己ベスト更新" fill="#0b7a43" />
+            <Bar dataKey="pb_updates" name="自己ベスト更新" fill={dark ? '#c9f7dd' : '#0b7a43'} />
           </BarChart>
         </ResponsiveContainer>
       </section>
