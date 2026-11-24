@@ -227,6 +227,32 @@ export function getLatestDaySummary(): Promise<LatestDaySummary> {
   return request('/api/summary/latest-day')
 }
 
+export interface AchievementBucket {
+  total_charts: number
+  played: number
+  clear: number
+  fc: number
+  gfc: number
+  pfc: number
+  mfc: number
+}
+
+export interface StatsResponse {
+  totals: AchievementBucket & {
+    plays: number
+    play_days: number
+    aaa: number
+    max_clear_level: number | null
+  }
+  by_level: (AchievementBucket & { play_style: string; level: number })[]
+  by_category: (AchievementBucket & { category: string })[]
+  monthly: { month: string; plays: number; pb_updates: number }[]
+}
+
+export function getStats(): Promise<StatsResponse> {
+  return request('/api/stats')
+}
+
 export function getChartHistory(chartId: string): Promise<ChartHistory> {
   return request(`/api/charts/${encodeURIComponent(chartId)}/history`)
 }

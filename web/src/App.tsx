@@ -7,6 +7,7 @@ import { SettingsPage } from './pages/Settings'
 import { BrowsePage } from './pages/Browse'
 import { ScoreDetailPage } from './pages/ScoreDetail'
 import { ChartPage } from './pages/Chart'
+import { StatsPage } from './pages/Stats'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/scores/:id" element={<ScoreDetailPage />} />
             <Route path="/charts/:chartId" element={<ChartPage />} />
             <Route path="/browse" element={<BrowsePage />} />
+            <Route path="/stats" element={<StatsPage />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
@@ -32,6 +34,7 @@ export default function App() {
           <NavLink to="/" end>ホーム</NavLink>
           <NavLink to="/history">履歴</NavLink>
           <NavLink to="/browse">楽曲</NavLink>
+          <NavLink to="/stats">統計</NavLink>
           <NavLink to="/review">要確認</NavLink>
           <NavLink to="/settings">設定</NavLink>
         </nav>

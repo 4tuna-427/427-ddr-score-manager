@@ -14,6 +14,7 @@ import {
   expandMasterSong,
   judgeSumCheck,
   normalizeTitle,
+  computeStats,
   type Extraction,
 } from "../src/lib";
 
@@ -256,4 +257,67 @@ test("planSync writes only new or actually-changed rows", async () => {
   // Tombstone appearing in the master -> song written.
   plan = planSync([song()], [chart()], [song({ deleted_at: "2026-01-01" })], [chart()]);
   assert.equal(plan.songUpserts.length, 1);
+});
+
+test("computeStats: achievements, best lamp across plays, monthly PB updates", () => {
+  const jst = (y: number, mo: number, d: number, h = 12) => Date.UTC(y, mo - 1, d, h) - 9 * 3600 * 1000;
+  const master = [
+    { chart_id: "c1", play_style: "SP", level: 15, category: "GOLD" as const },
+    { chart_id: "c2", play_style: "SP", level: 15, category: "GOLD" as const },
+    { chart_id: "c5", play_style: "SP", level: 15, category: "GOLD" as const },
+    { chart_id: "c3", play_style: "SP", level: 18, category: "CLASSIC" as const },
+    { chart_id: "c4", play_style: "DP", level: 12, category: "WHITE" as const },
+  ];
+  const plays = [
+    { chart_id: "c1", score: 900000, rank: "AA", clear_lamp: "FC", played_at: jst(2026, 10, 5) },
+    { chart_id: "c1", score: 950000, rank: "AAA", clear_lamp: "PFC", played_at: jst(2026, 11, 2) },
+    { chart_id: "c2", score: 800000, rank: "A", clear_lamp: "LIFE4", played_at: jst(2026, 11, 3) },
+    // lower score but a full combo: best lamp must come from THIS play
+    { chart_id: "c2", score: 750000, rank: "A-", clear_lamp: "FC", played_at: jst(2026, 11, 4) },
+    { chart_id: "c3", score: 700000, rank: "B", clear_lamp: "FAILED", played_at: jst(2026, 11, 3) },
+    { chart_id: "c3", score: 990000, rank: "AAA", clear_lamp: "MFC", played_at: jst(2026, 11, 10) },
+    { chart_id: null, score: 500000, rank: null, clear_lamp: null, played_at: jst(2026, 11, 5) },
+    // outside the 12-month window: counts in buckets/play_days, not monthly
+    { chart_id: "c4", score: 600000, rank: "C", clear_lamp: "CLEAR", played_at: jst(2025, 6, 15) },
+  ];
+  const s = computeStats(master, plays, jst(2026, 11, 25));
+
+  assert.equal(s.totals.total_charts, 5);
+  assert.equal(s.totals.played, 4);
+  assert.equal(s.totals.clear, 4);
+  assert.equal(s.totals.fc, 3); // c1, c2 (via the lower-score play), c3
+  assert.equal(s.totals.gfc, 2);
+  assert.equal(s.totals.pfc, 2);
+  assert.equal(s.totals.mfc, 1);
+  assert.equal(s.totals.plays, 8);
+  assert.equal(s.totals.play_days, 7);
+  assert.equal(s.totals.aaa, 2);
+  assert.equal(s.totals.max_clear_level, 18);
+
+  const sp15 = s.by_level.find((r) => r.play_style === "SP" && r.level === 15)!;
+  assert.deepEqual(
+    [sp15.total_charts, sp15.played, sp15.clear, sp15.fc, sp15.gfc, sp15.pfc, sp15.mfc],
+    [3, 2, 2, 2, 1, 1, 0],
+  );
+  const sp18 = s.by_level.find((r) => r.play_style === "SP" && r.level === 18)!;
+  assert.equal(sp18.mfc, 1);
+  const dp12 = s.by_level.find((r) => r.play_style === "DP" && r.level === 12)!;
+  assert.deepEqual([dp12.played, dp12.clear, dp12.fc], [1, 1, 0]);
+  // level rows: SP first, level descending
+  assert.deepEqual(s.by_level.map((r) => `${r.play_style}${r.level}`), ["SP18", "SP15", "DP12"]);
+
+  const gold = s.by_category.find((r) => r.category === "GOLD")!;
+  assert.deepEqual([gold.total_charts, gold.played, gold.pfc], [3, 2, 1]);
+  const classic = s.by_category.find((r) => r.category === "CLASSIC")!;
+  assert.equal(classic.mfc, 1);
+  const white = s.by_category.find((r) => r.category === "WHITE")!;
+  assert.deepEqual([white.played, white.clear, white.fc], [1, 1, 0]);
+
+  assert.equal(s.monthly.length, 12);
+  assert.equal(s.monthly[0].month, "2025-12");
+  assert.equal(s.monthly[11].month, "2026-11");
+  const oct = s.monthly.find((m) => m.month === "2026-10")!;
+  assert.deepEqual([oct.plays, oct.pb_updates], [1, 0]);
+  const nov = s.monthly.find((m) => m.month === "2026-11")!;
+  assert.deepEqual([nov.plays, nov.pb_updates], [6, 2]); // PB: c1 and c3 improvements only
 });

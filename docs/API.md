@@ -90,6 +90,14 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 → 直近のプレイ日（JST基準）のサマリ `{date, total_plays, unique_charts, updates}`。`updates` はその日に自己ベストを更新した譜面（同日複数プレイは最良のみ）で、各要素はスコア行＋ `prev_best`（その日より前の自己ベスト）/ `diff` / `is_new`（初プレイ）。スコアが無い場合は `date: null`。
 ※ スコア行には `chart_max_ex`（譜面の最大EXスコア）が付く（scores 一覧・詳細・export・summary 共通）。EX達成率は `ex_score / chart_max_ex` でクライアントが算出する。
 
+### GET /api/stats
+→ 統計・達成状況 `{totals, by_level, by_category, monthly}`。
+- 集計単位は譜面ごとのベスト達成：ランプとランクは「ベストスコアのプレイ」ではなく全プレイ中の最良を採用（低スコアでもFCしたプレイがあればFC扱い）。LIFE4 はクリア扱いで FC には数えない。
+- `totals`: 全譜面に対するバケット＋ `plays`（総プレイ数）/ `play_days`（JSTのプレイ日数）/ `aaa`（ベストランクAAAの譜面数）/ `max_clear_level`（クリア済み最大レベル、無ければ null）。
+- バケット共通フィールド: `total_charts`（マスタ譜面数）/ `played` / `clear` / `fc` / `gfc` / `pfc` / `mfc`（各しきい値以上の譜面数）。
+- `by_level`: `{play_style, level, ...バケット}`（SP→DP、レベル降順）。`by_category`: `{category, ...バケット}`（GOLD/WHITE/CLASSIC の順、カテゴリは曲のバージョンで判定）。
+- `monthly`: 直近12か月（JST）`{month: "YYYY-MM", plays, pb_updates}`。`pb_updates` は既プレイ譜面の自己ベスト更新回数（初プレイは含まない）。chart_id 未紐付けのプレイは totals.plays と monthly.plays にのみ数える。
+
 ### GET /api/export
 → 全スコア（songs 結合つき、played_at 昇順）を `{exported_at, count, scores}` で返す。`Content-Disposition: attachment` つきのバックアップ用JSON。
 

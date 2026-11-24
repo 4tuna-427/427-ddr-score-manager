@@ -451,3 +451,156 @@ export const CATEGORY_VERSION_SPELLINGS: Record<SongCategory, string[]> = {
   WHITE: ["2013", "2014", "A"],
   GOLD: ["A20", "A20 PLUS", "A3", "WORLD"],
 };
+
+// ---- stats / achievements ----
+
+/** Clear-lamp strength. LIFE4 is a clear, not a full combo. */
+export const LAMP_RANK: Record<string, number> = {
+  FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6,
+};
+
+/** Score-rank strength, weakest first. */
+export const RANK_ORDER = [
+  "E", "D", "D+", "C-", "C", "C+", "B-", "B", "B+",
+  "A-", "A", "A+", "AA-", "AA", "AA+", "AAA",
+];
+
+export interface StatPlay {
+  chart_id: string | null;
+  score: number;
+  rank: string | null;
+  clear_lamp: string | null;
+  played_at: number;
+}
+
+export interface StatMasterChart {
+  chart_id: string;
+  play_style: string;
+  level: number | null;
+  category: SongCategory | null;
+}
+
+export interface AchievementBucket {
+  total_charts: number;
+  played: number;
+  clear: number;
+  fc: number;
+  gfc: number;
+  pfc: number;
+  mfc: number;
+}
+
+export interface StatsResult {
+  totals: AchievementBucket & {
+    plays: number;
+    play_days: number;
+    aaa: number;
+    max_clear_level: number | null;
+  };
+  by_level: ({ play_style: string; level: number } & AchievementBucket)[];
+  by_category: ({ category: SongCategory } & AchievementBucket)[];
+  monthly: { month: string; plays: number; pb_updates: number }[];
+}
+
+const emptyBucket = (): AchievementBucket => ({
+  total_charts: 0, played: 0, clear: 0, fc: 0, gfc: 0, pfc: 0, mfc: 0,
+});
+
+/**
+ * Aggregate achievements and activity from the master chart list and ALL
+ * plays (any order). Per chart, the best lamp and best rank are taken
+ * across all its plays (not just the best-score play). Monthly PB updates
+ * count strict score improvements on already-played charts, by JST month,
+ * for the 12 months ending with nowMs's month. Plays without a chart_id
+ * count toward totals.plays and monthly plays only.
+ */
+export function computeStats(
+  masterCharts: StatMasterChart[],
+  plays: StatPlay[],
+  nowMs: number,
+): StatsResult {
+  const sorted = [...plays].sort((a, b) => a.played_at - b.played_at);
+
+  // Monthly buckets for the last 12 JST months (oldest first).
+  const months: { month: string; plays: number; pb_updates: number }[] = [];
+  const monthIdx = new Map<string, number>();
+  {
+    const now = new Date(nowMs + 9 * 3600 * 1000); // JST wall clock
+    let y = now.getUTCFullYear();
+    let m = now.getUTCMonth(); // 0-based
+    const keys: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      keys.unshift(`${y}-${String(m + 1).padStart(2, "0")}`);
+      m -= 1;
+      if (m < 0) { m = 11; y -= 1; }
+    }
+    for (const k of keys) {
+      monthIdx.set(k, months.length);
+      months.push({ month: k, plays: 0, pb_updates: 0 });
+    }
+  }
+
+  const bestScore = new Map<string, number>();
+  const bestLamp = new Map<string, number>();
+  const bestRank = new Map<string, number>();
+  const playDays = new Set<string>();
+
+  for (const p of sorted) {
+    playDays.add(jstDateString(p.played_at));
+    const mi = monthIdx.get(jstDateString(p.played_at).slice(0, 7));
+    if (mi !== undefined) months[mi].plays += 1;
+    if (!p.chart_id) continue;
+    const prevBest = bestScore.get(p.chart_id);
+    if (prevBest !== undefined && p.score > prevBest && mi !== undefined) {
+      months[mi].pb_updates += 1;
+    }
+    if (prevBest === undefined || p.score > prevBest) bestScore.set(p.chart_id, p.score);
+    const lamp = p.clear_lamp != null ? (LAMP_RANK[p.clear_lamp] ?? -1) : -1;
+    if (lamp > (bestLamp.get(p.chart_id) ?? -1)) bestLamp.set(p.chart_id, lamp);
+    const rank = p.rank != null ? RANK_ORDER.indexOf(p.rank) : -1;
+    if (rank > (bestRank.get(p.chart_id) ?? -1)) bestRank.set(p.chart_id, rank);
+  }
+
+  const applyTo = (b: AchievementBucket, chartId: string) => {
+    b.total_charts += 1;
+    if (!bestScore.has(chartId)) return;
+    b.played += 1;
+    const lamp = bestLamp.get(chartId) ?? -1;
+    if (lamp >= LAMP_RANK.CLEAR) b.clear += 1;
+    if (lamp >= LAMP_RANK.FC) b.fc += 1;
+    if (lamp >= LAMP_RANK.GFC) b.gfc += 1;
+    if (lamp >= LAMP_RANK.PFC) b.pfc += 1;
+    if (lamp >= LAMP_RANK.MFC) b.mfc += 1;
+  };
+
+  const totals: StatsResult["totals"] = {
+    ...emptyBucket(), plays: plays.length, play_days: playDays.size, aaa: 0, max_clear_level: null,
+  };
+  const levelMap = new Map<string, StatsResult["by_level"][number]>();
+  const catMap = new Map<SongCategory, AchievementBucket>();
+  for (const cat of ["GOLD", "WHITE", "CLASSIC"] as SongCategory[]) catMap.set(cat, emptyBucket());
+
+  for (const ch of masterCharts) {
+    applyTo(totals, ch.chart_id);
+    if (bestRank.get(ch.chart_id) === RANK_ORDER.length - 1) totals.aaa += 1;
+    if ((bestLamp.get(ch.chart_id) ?? -1) >= LAMP_RANK.CLEAR && ch.level != null) {
+      totals.max_clear_level = Math.max(totals.max_clear_level ?? 0, ch.level);
+    }
+    if (ch.level != null) {
+      const key = `${ch.play_style}|${ch.level}`;
+      let row = levelMap.get(key);
+      if (!row) {
+        row = { play_style: ch.play_style, level: ch.level, ...emptyBucket() };
+        levelMap.set(key, row);
+      }
+      applyTo(row, ch.chart_id);
+    }
+    if (ch.category) applyTo(catMap.get(ch.category)!, ch.chart_id);
+  }
+
+  const by_level = [...levelMap.values()].sort((a, b) =>
+    a.play_style === b.play_style ? b.level - a.level : a.play_style === "SP" ? -1 : 1);
+  const by_category = (["GOLD", "WHITE", "CLASSIC"] as SongCategory[])
+    .map((category) => ({ category, ...catMap.get(category)! }));
+  return { totals, by_level, by_category, monthly: months };
+}

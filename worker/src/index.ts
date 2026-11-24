@@ -11,6 +11,7 @@ import {
   jstDateString,
   jstDayStartMs,
   computeDayUpdates,
+  computeStats,
   songCategory,
   CATEGORY_VERSION_SPELLINGS,
   type SongCategory,
@@ -328,6 +329,27 @@ app.get("/api/summary/latest-day", async (c) => {
     unique_charts: chartIds.length,
     updates,
   });
+});
+
+// ---- GET /api/stats: achievements (per level / category) + monthly activity ----
+app.get("/api/stats", async (c) => {
+  const { results: masterRows } = await c.env.DB
+    .prepare(
+      `SELECT ch.chart_id AS chart_id, ch.play_style AS play_style, ch.level AS level,
+              s.version AS version
+       FROM charts ch JOIN songs s ON s.song_id = ch.song_id`,
+    )
+    .all<{ chart_id: string; play_style: string; level: number | null; version: string | null }>();
+  const { results: playRows } = await c.env.DB
+    .prepare("SELECT chart_id, score, rank, clear_lamp, played_at FROM scores")
+    .all<{ chart_id: string | null; score: number; rank: string | null; clear_lamp: string | null; played_at: number }>();
+  const master = masterRows.map((r) => ({
+    chart_id: r.chart_id,
+    play_style: r.play_style,
+    level: r.level,
+    category: songCategory(r.version),
+  }));
+  return c.json(computeStats(master, playRows, Date.now()));
 });
 
 // ---- export: full score history as a downloadable JSON backup ----
