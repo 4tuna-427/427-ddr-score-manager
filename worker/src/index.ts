@@ -14,6 +14,8 @@ import {
   computeStats,
   computeCloseCalls,
   computeVersus,
+  findPhashCandidates,
+  isValidPhash64,
   songCategory,
   CATEGORY_VERSION_SPELLINGS,
   type SongCategory,
@@ -794,6 +796,39 @@ app.delete("/api/targets/:chart_id", async (c) => {
   if (!existing) return c.json({ error: "target not found" }, 404);
   await c.env.DB.prepare("DELETE FROM targets WHERE chart_id = ?").bind(chartId).run();
   return c.json({ deleted: true });
+});
+
+// ---- GET /api/songs/by-phash?phash=...&max_distance=20&limit=5 ----
+// Nearest songs by jacket pHash (hamming distance). Candidates are
+// suggestions only: Phase 2.4 verification showed true matches at
+// distance 18-36 while unrelated songs match at 16-20, so a small
+// distance does not prove a match. Never auto-link from this alone.
+app.get("/api/songs/by-phash", async (c) => {
+  const phash = (c.req.query("phash") ?? "").toLowerCase();
+  if (!isValidPhash64(phash)) {
+    return c.json({ error: "phash must be 16 hex characters" }, 400);
+  }
+  const maxDistance = Math.min(Math.max(parseInt(c.req.query("max_distance") ?? "20", 10) || 20, 0), 64);
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "5", 10) || 5, 1), 20);
+  const { results: songs } = await c.env.DB
+    .prepare("SELECT song_id, title, artist, phash_8 FROM songs WHERE phash_8 IS NOT NULL")
+    .all<{ song_id: string; title: string; artist: string | null; phash_8: string }>();
+  const candidates = findPhashCandidates(phash, songs, limit, maxDistance);
+  const items = [];
+  for (const cand of candidates) {
+    const { results: charts } = await c.env.DB
+      .prepare("SELECT chart_id, play_style, difficulty, level FROM charts WHERE song_id = ? ORDER BY play_style, difficulty")
+      .bind(cand.song.song_id)
+      .all();
+    items.push({
+      song_id: cand.song.song_id,
+      title: cand.song.title,
+      artist: cand.song.artist,
+      distance: cand.distance,
+      charts,
+    });
+  }
+  return c.json({ items });
 });
 
 // ---- GET /api/songs?q= ----

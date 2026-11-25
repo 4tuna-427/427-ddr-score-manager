@@ -881,3 +881,52 @@ export function computeVersus(rows: VersusRow[], myName: string | null | undefin
   recent.sort((a, b) => b.played_at - a.played_at);
   return { opponents, recent: recent.slice(0, 10) };
 }
+
+// ---- pHash matching (Phase 2.4) ----
+
+/** A 64-bit pHash as stored in songs.phash_8: 16 lowercase hex chars. */
+export function isValidPhash64(phash: string | null | undefined): phash is string {
+  return typeof phash === "string" && /^[0-9a-f]{16}$/i.test(phash);
+}
+
+/** Hamming distance between two equal-length hex strings (assumes valid input). */
+export function hammingDistanceHex(a: string, b: string): number {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    while (x) {
+      d += x & 1;
+      x >>= 1;
+    }
+  }
+  return d;
+}
+
+export interface PhashCandidate<T> {
+  song: T;
+  distance: number;
+}
+
+/**
+ * Nearest songs by pHash hamming distance (closest first, at most `limit`,
+ * only distances <= `maxDistance`). Songs without a valid phash_8 are skipped.
+ * NOTE: verification on the 6 Phase 0 photos (2026-11-25) showed true
+ * matches at distance 18-36 while unrelated songs match at 16-20, so a
+ * small distance does NOT prove a match — treat candidates as suggestions
+ * only, never as automatic links.
+ */
+export function findPhashCandidates<T extends { phash_8: string | null }>(
+  phash: string,
+  songs: T[],
+  limit = 5,
+  maxDistance = 20,
+): PhashCandidate<T>[] {
+  if (!isValidPhash64(phash)) return [];
+  const out: PhashCandidate<T>[] = [];
+  for (const s of songs) {
+    if (!isValidPhash64(s.phash_8)) continue;
+    const distance = hammingDistanceHex(phash, s.phash_8);
+    if (distance <= maxDistance) out.push({ song: s, distance });
+  }
+  return out.sort((a, b) => a.distance - b.distance).slice(0, limit);
+}

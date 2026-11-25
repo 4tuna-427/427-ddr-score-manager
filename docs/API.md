@@ -140,6 +140,11 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 ### POST /api/scores/:id/link  `{chart_id}`
 - chart を紐付け直し、検算を再実行する。
 
+### GET /api/songs/by-phash?phash=...&max_distance=20&limit=5
+→ ジャケット pHash（16桁hex＝64bit、`songs.phash_8`）にハミング距離が近い曲を返す `{items: [{song_id, title, artist, distance, charts}]}`（距離昇順、最大5件）。`phash` が16桁hexでない場合は 400。
+- **精度の注意（Phase 2.4 検証結果）**: Phase 0 の実写真6枚で検証したところ、正しい曲までの距離は 18〜36（順位 2〜1271位）で、無関係の曲が 16〜20 で一致することもあった。画面写真のモアレ・反射・斜め撮影と `jacket_bbox` の精度が支配的で、**このエンドポイントの候補を自動リンクに使ってはいけない**。候補提示として使う場合も、距離の小ささは一致の証明にならない。ブラウザ側の計算は `web/src/lib/phash.ts`（標準的な imagehash 式 pHash。TS 実装と Python 参照実装の一致は 6 枚全てで確認済み）。
+- `max_distance`（既定20、0〜64）、`limit`（既定5、1〜20）で調整できる。phash が無い 36 曲は対象外。
+
 ### GET /api/songs?q=... → `{items: [{song_id, title, artist, charts: [{chart_id, play_style, difficulty, level}]}]}`（正規化部分一致、最大20件）
 
 ### GET /api/charts/:chart_id/history → `{chart: {...song情報付き}, items: [<scores行> played_at 昇順]}`

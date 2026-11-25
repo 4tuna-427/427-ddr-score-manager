@@ -487,3 +487,41 @@ test("computeVersus aggregates opponents from raw_extraction (Phase 0 versus gro
   // No MY_DANCER_NAME configured: nothing can be attributed.
   assert.deepEqual(computeVersus(rows, null), { opponents: [], recent: [] });
 });
+
+test("hammingDistanceHex and findPhashCandidates rank by distance", async () => {
+  const { hammingDistanceHex, findPhashCandidates, isValidPhash64 } = await import("../src/lib");
+  assert.equal(hammingDistanceHex("0000000000000000", "0000000000000000"), 0);
+  assert.equal(hammingDistanceHex("ffffffffffffffff", "0000000000000000"), 64);
+  assert.equal(hammingDistanceHex("9af667693a15209e", "9af667693a15209e"), 0);
+  assert.equal(hammingDistanceHex("9af667693a15209e", "9af667693a15209f"), 1);
+  assert.equal(isValidPhash64("9af667693a15209e"), true);
+  assert.equal(isValidPhash64("9AF667693A15209E"), true);
+  assert.equal(isValidPhash64("xyz"), false);
+  assert.equal(isValidPhash64("9af667693a15209"), false); // 15 chars
+  assert.equal(isValidPhash64(null), false);
+
+  const songs = [
+    { song_id: "a", phash_8: "0000000000000000" },
+    { song_id: "b", phash_8: "0000000000000001" },
+    { song_id: "c", phash_8: "ffffffffffffffff" },
+    { song_id: "d", phash_8: null },
+  ];
+  // Query 1 bit from "a", 2 bits from "b": closest first, null-phash skipped.
+  assert.deepEqual(
+    findPhashCandidates("0000000000000003", songs, 5, 20).map((c) => [c.song.song_id, c.distance]),
+    [["b", 1], ["a", 2]],
+  );
+  // maxDistance filters; limit caps.
+  assert.deepEqual(findPhashCandidates("0000000000000003", songs, 5, 1).map((c) => c.song.song_id), ["b"]);
+  assert.deepEqual(findPhashCandidates("0000000000000003", songs, 1, 20).map((c) => c.song.song_id), ["b"]);
+  assert.deepEqual(findPhashCandidates("not-a-phash", songs), []);
+  // The real Phase 0 Pierce The Sky photo hash (variant A) vs the fixture
+  // songs: the correct song is at distance 24, i.e. outside the default
+  // maxDistance of 20 — this is the documented accuracy limitation.
+  const masterV2Local = JSON.parse(readFileSync(masterPath, "utf-8")) as Array<Record<string, any>>;
+  const fixtureSongs = masterV2Local.map((s) => ({ song_id: String(s.id), phash_8: (s.phash_8 as string | null) ?? null }));
+  const pierce = fixtureSongs.find((s) => s.song_id === "DD6olq00PD91odbO9QbldDb0bQ18oqo1")!;
+  assert.equal(hammingDistanceHex("9af667693a15209e", pierce.phash_8!), 24);
+  assert.equal(findPhashCandidates("9af667693a15209e", fixtureSongs, 5, 20).length, 0);
+  assert.equal(findPhashCandidates("9af667693a15209e", fixtureSongs, 5, 24)[0]?.song.song_id, pierce.song_id);
+});
