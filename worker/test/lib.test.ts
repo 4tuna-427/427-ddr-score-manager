@@ -321,3 +321,78 @@ test("computeStats: achievements, best lamp across plays, monthly PB updates", (
   const nov = s.monthly.find((m) => m.month === "2026-11")!;
   assert.deepEqual([nov.plays, nov.pb_updates], [6, 2]); // PB: c1 and c3 improvements only
 });
+
+test("lampGap measures judgments to the next lamp", async () => {
+  const { lampGap } = await import("../src/lib");
+  // CLEAR -> FC: only Misses break the combo (Goods do not).
+  assert.deepEqual(lampGap({ clear_lamp: "CLEAR", great: 10, good: 5, miss: 2, perfect: 0 }), { next_lamp: "FC", gap: 2 });
+  assert.deepEqual(lampGap({ clear_lamp: "LIFE4", great: 0, good: 0, miss: 0, perfect: 0 }), { next_lamp: "FC", gap: 0 });
+  // FC -> GFC: at most one Great and no Good.
+  assert.deepEqual(lampGap({ clear_lamp: "FC", great: 3, good: 1, miss: 0, perfect: 0 }), { next_lamp: "GFC", gap: 3 });
+  assert.deepEqual(lampGap({ clear_lamp: "FC", great: 1, good: 0, miss: 0, perfect: 0 }), { next_lamp: "GFC", gap: 0 });
+  // GFC -> PFC: no Great/Good left.
+  assert.deepEqual(lampGap({ clear_lamp: "GFC", great: 2, good: 0, miss: 0, perfect: 0 }), { next_lamp: "PFC", gap: 2 });
+  // PFC -> MFC: every Perfect must become Marvelous.
+  assert.deepEqual(lampGap({ clear_lamp: "PFC", great: 0, good: 0, miss: 0, perfect: 4 }), { next_lamp: "MFC", gap: 4 });
+  // No next lamp, or no lamp at all.
+  assert.equal(lampGap({ clear_lamp: "MFC", great: 0, good: 0, miss: 0, perfect: 0 }), null);
+  assert.equal(lampGap({ clear_lamp: "FAILED", great: 0, good: 0, miss: 30, perfect: 0 }), null);
+  assert.equal(lampGap({ clear_lamp: null, great: 0, good: 0, miss: 0, perfect: 0 }), null);
+  // Missing judgments are unknown, never zero: no close call is claimed.
+  assert.equal(lampGap({ clear_lamp: "PFC", great: 0, good: 0, miss: 0, perfect: null }), null);
+  assert.equal(lampGap({ clear_lamp: "FC", great: null, good: 0, miss: 0, perfect: 0 }), null);
+  assert.equal(lampGap({ clear_lamp: "CLEAR", great: 0, good: 0, miss: null, perfect: 0 }), null);
+});
+
+test("computeCloseCalls finds AAA-near and lamp-near charts", async () => {
+  const { computeCloseCalls } = await import("../src/lib");
+  const play = (over: Record<string, unknown>) => ({
+    chart_id: "c", score: 900000, rank: "AA", clear_lamp: "FC",
+    marvelous: 100, perfect: 50, great: 0, good: 0, miss: 0, ...over,
+  });
+  const calls = computeCloseCalls([
+    // 985,000: within 10,000 of AAA; FC with 0 Great/Good -> already GFC by counts (gap 0)
+    play({ chart_id: "aaa-lamp", score: 985000 }),
+    // 979,999: 10,001 away from AAA -> not an AAA close call; GFC 2 Greats from PFC
+    play({ chart_id: "lamp-only", score: 979999, clear_lamp: "GFC", great: 2 }),
+    // Exactly 990,000 is AAA already, not a close call; PFC with 6 Perfects is also not lamp-close
+    play({ chart_id: "aaa-done", score: 990000, clear_lamp: "PFC", perfect: 6 }),
+    // FAILED is never a lamp close call
+    play({ chart_id: "failed", score: 700000, clear_lamp: "FAILED", miss: 20 }),
+    // PFC 6 Perfects from MFC: gap 6 > 5, not close
+    play({ chart_id: "pfc-far", score: 995000, clear_lamp: "PFC", perfect: 6 }),
+    // CLEAR with 3 Misses from FC
+    play({ chart_id: "clear-near", score: 800000, clear_lamp: "CLEAR", miss: 3 }),
+  ]);
+  const byId = new Map(calls.map((c) => [`${c.chart_id}:${c.kind}`, c]));
+  assert.equal(byId.get("aaa-lamp:aaa")?.gap, 5000);
+  assert.equal(byId.get("aaa-lamp:lamp")?.gap, 0);
+  assert.equal(byId.get("aaa-lamp:lamp")?.next_lamp, "GFC");
+  assert.equal(byId.get("lamp-only:lamp")?.gap, 2);
+  assert.equal(byId.get("lamp-only:lamp")?.next_lamp, "PFC");
+  assert.equal(byId.has("lamp-only:aaa"), false);
+  assert.equal(byId.has("aaa-done:aaa"), false);
+  assert.equal(byId.has("aaa-done:lamp"), false);
+  assert.equal(byId.get("clear-near:lamp")?.gap, 3);
+  assert.equal(byId.has("failed:lamp"), false);
+  assert.equal(byId.has("pfc-far:lamp"), false);
+  // Lamp close calls sort before AAA close calls, each by gap ascending.
+  assert.deepEqual(calls.map((c) => `${c.chart_id}:${c.kind}`), [
+    "aaa-lamp:lamp", "lamp-only:lamp", "clear-near:lamp", "aaa-lamp:aaa",
+  ]);
+});
+
+test("resolveModelList orders models and honors GEMINI_MODELS override", async () => {
+  const { resolveModelList } = await import("../src/gemini");
+  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x" }), ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]);
+  assert.deepEqual(
+    resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODEL: "gemini-2.5-flash" }),
+    ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"],
+  );
+  // Explicit override replaces the whole list (deduped, order kept).
+  assert.deepEqual(
+    resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODELS: "gemini-2.5-flash, gemini-3.5-flash-lite, gemini-2.5-flash" }),
+    ["gemini-2.5-flash", "gemini-3.5-flash-lite"],
+  );
+  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODELS: "  " }), ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]);
+});

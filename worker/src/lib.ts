@@ -452,7 +452,109 @@ export const CATEGORY_VERSION_SPELLINGS: Record<SongCategory, string[]> = {
   GOLD: ["A20", "A20 PLUS", "A3", "WORLD"],
 };
 
-// ---- stats / achievements ----
+// ---- close calls ("あと少し" list) ----
+
+/** Score needed for AAA. */
+export const AAA_SCORE = 990000;
+/** A best score within this many points of AAA counts as "almost there". */
+export const CLOSE_CALL_SCORE_GAP = 10000;
+/** A next lamp within this many judgments to fix counts as "almost there". */
+export const CLOSE_CALL_LAMP_GAP = 5;
+
+export interface CloseCallPlay {
+  chart_id: string;
+  score: number;
+  rank: string | null;
+  clear_lamp: string | null;
+  marvelous: number | null;
+  perfect: number | null;
+  great: number | null;
+  good: number | null;
+  miss: number | null;
+}
+
+export interface LampGap {
+  next_lamp: string;
+  gap: number;
+}
+
+/**
+ * Distance (in judgments to fix) from the current clear lamp to the next
+ * one, or null when there is no next lamp (MFC, FAILED, unknown lamp) or
+ * when the judgments needed for the distance are missing (null means the
+ * value was not read — never treat it as 0, or missing data would look
+ * like a zero-gap close call).
+ * DDR combo rules: a Good does not break the combo, a Miss does; GFC
+ * allows at most one Great and no Good/Miss; PFC allows no Great/Good/Miss;
+ * MFC allows no Perfect either. FAILED has no lamp progression — clearing
+ * the chart comes first, so it is not a close call.
+ */
+export function lampGap(
+  p: Pick<CloseCallPlay, "clear_lamp" | "great" | "good" | "miss" | "perfect">,
+): LampGap | null {
+  const lamp = p.clear_lamp;
+  if (!lamp) return null;
+  const { great, good, miss, perfect } = p;
+  switch (lamp) {
+    case "CLEAR":
+    case "LIFE4":
+      if (miss == null) return null;
+      return { next_lamp: "FC", gap: miss };
+    case "FC":
+      if (great == null || good == null) return null;
+      return { next_lamp: "GFC", gap: Math.max(0, great + good - 1) };
+    case "GFC":
+      if (great == null || good == null) return null;
+      return { next_lamp: "PFC", gap: great + good };
+    case "PFC":
+      if (perfect == null) return null;
+      return { next_lamp: "MFC", gap: perfect };
+    default:
+      return null;
+  }
+}
+
+export type CloseCallKind = "aaa" | "lamp";
+
+export interface CloseCall {
+  chart_id: string;
+  kind: CloseCallKind;
+  /** Score gap to AAA (kind "aaa") or judgment gap to the next lamp (kind "lamp"). */
+  gap: number;
+  next_lamp?: string;
+  score: number;
+  rank: string | null;
+  clear_lamp: string | null;
+}
+
+/**
+ * From each chart's best-score play, find the "almost there" charts:
+ * best score within CLOSE_CALL_SCORE_GAP of AAA, and/or the next lamp
+ * within CLOSE_CALL_LAMP_GAP judgments. A chart can appear twice (one
+ * entry per kind). Lamp close calls come first, each group sorted by gap.
+ */
+export function computeCloseCalls(plays: CloseCallPlay[]): CloseCall[] {
+  const out: CloseCall[] = [];
+  for (const p of plays) {
+    if (p.score >= AAA_SCORE - CLOSE_CALL_SCORE_GAP && p.score < AAA_SCORE) {
+      out.push({
+        chart_id: p.chart_id, kind: "aaa", gap: AAA_SCORE - p.score,
+        score: p.score, rank: p.rank, clear_lamp: p.clear_lamp,
+      });
+    }
+    const lg = lampGap(p);
+    if (lg && lg.gap <= CLOSE_CALL_LAMP_GAP) {
+      out.push({
+        chart_id: p.chart_id, kind: "lamp", gap: lg.gap, next_lamp: lg.next_lamp,
+        score: p.score, rank: p.rank, clear_lamp: p.clear_lamp,
+      });
+    }
+  }
+  const kindOrder = (k: CloseCallKind) => (k === "lamp" ? 0 : 1);
+  return out.sort((a, b) =>
+    kindOrder(a.kind) - kindOrder(b.kind) || a.gap - b.gap || a.chart_id.localeCompare(b.chart_id));
+}
+
 
 /** Clear-lamp strength. LIFE4 is a clear, not a full combo. */
 export const LAMP_RANK: Record<string, number> = {

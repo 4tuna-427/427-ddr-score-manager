@@ -12,6 +12,7 @@ import {
   jstDayStartMs,
   computeDayUpdates,
   computeStats,
+  computeCloseCalls,
   songCategory,
   CATEGORY_VERSION_SPELLINGS,
   type SongCategory,
@@ -27,6 +28,7 @@ export interface Env {
   API_TOKEN: string;
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
+  GEMINI_MODELS?: string;
   MASTER_URL?: string;
   MY_DANCER_NAME?: string;
 }
@@ -350,6 +352,201 @@ app.get("/api/stats", async (c) => {
     category: songCategory(r.version),
   }));
   return c.json(computeStats(master, playRows, Date.now()));
+});
+
+// ---- GET /api/close-calls: charts whose best play is almost AAA / almost the next lamp ----
+app.get("/api/close-calls", async (c) => {
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
+       FROM scores s
+       JOIN charts ON charts.chart_id = s.chart_id
+       JOIN songs ON songs.song_id = s.song_id
+       WHERE s.chart_id IS NOT NULL
+         AND s.score = (SELECT MAX(score) FROM scores b WHERE b.chart_id = s.chart_id)
+       ORDER BY s.played_at DESC`,
+    )
+    .all<Record<string, unknown> & {
+      chart_id: string; score: number; rank: string | null; clear_lamp: string | null;
+      marvelous: number | null; perfect: number | null; great: number | null;
+      good: number | null; miss: number | null; song_title: string | null;
+      artist: string | null; play_style: string; difficulty: string; level: number | null;
+    }>();
+  // Ties on the best score: keep the latest play per chart.
+  const seen = new Set<string>();
+  const best: typeof results = [];
+  for (const r of results) {
+    if (seen.has(r.chart_id)) continue;
+    seen.add(r.chart_id);
+    best.push(r);
+  }
+  const byId = new Map(best.map((r) => [r.chart_id, r]));
+  const items = computeCloseCalls(best).map((cc) => {
+    const r = byId.get(cc.chart_id)!;
+    return {
+      ...cc,
+      song_title: r.song_title,
+      artist: r.artist,
+      play_style: r.play_style,
+      difficulty: r.difficulty,
+      level: r.level,
+    };
+  });
+  return c.json({ items });
+});
+
+// ---- POST /api/import: restore an export JSON (GET /api/export format) ----
+const IMPORT_COLUMNS = [
+  "id", "chart_id", "song_id", "raw_title", "play_style", "difficulty", "level",
+  "score", "ex_score", "rank", "clear_lamp", "flare_rank",
+  "marvelous", "perfect", "great", "good", "ok", "miss",
+  "fast_count", "slow_count", "max_combo",
+  "ex_check", "judge_sum_check", "needs_review",
+  "image_hash", "source", "raw_extraction", "played_at", "created_at",
+] as const;
+
+function isInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v);
+}
+function isOptInt(v: unknown): boolean {
+  return v == null || isInt(v);
+}
+function isOptStr(v: unknown): boolean {
+  return v == null || typeof v === "string";
+}
+
+/** Validate one exported score row; returns the INSERT values in IMPORT_COLUMNS order. */
+function validateImportRow(row: unknown): { ok: true; values: unknown[] } | { ok: false; reason: string } {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return { ok: false, reason: "not an object" };
+  const r = row as Record<string, unknown>;
+  if (typeof r.id !== "string" || !r.id) return { ok: false, reason: "id is required" };
+  if (!isInt(r.score) || (r.score as number) < 0 || (r.score as number) > 1000000) {
+    return { ok: false, reason: "score must be an integer 0..1000000" };
+  }
+  if (!isInt(r.played_at) || (r.played_at as number) <= 0) {
+    return { ok: false, reason: "played_at must be a positive integer (epoch ms)" };
+  }
+  if (r.play_style !== "SP" && r.play_style !== "DP") return { ok: false, reason: "play_style must be SP or DP" };
+  if (typeof r.difficulty !== "string" || !r.difficulty) return { ok: false, reason: "difficulty is required" };
+  for (const k of ["ex_score", "level", "marvelous", "perfect", "great", "good", "ok", "miss",
+    "fast_count", "slow_count", "max_combo"]) {
+    if (!isOptInt(r[k])) return { ok: false, reason: `${k} must be an integer or null` };
+  }
+  for (const k of ["chart_id", "song_id", "raw_title", "rank", "clear_lamp", "flare_rank",
+    "ex_check", "judge_sum_check", "image_hash", "source", "raw_extraction"]) {
+    if (!isOptStr(r[k])) return { ok: false, reason: `${k} must be a string or null` };
+  }
+  if (r.needs_review != null && r.needs_review !== 0 && r.needs_review !== 1) {
+    return { ok: false, reason: "needs_review must be 0 or 1" };
+  }
+  const createdAt = isInt(r.created_at) ? r.created_at : Date.now();
+  const values = IMPORT_COLUMNS.map((col) => {
+    if (col === "created_at") return createdAt;
+    if (col === "source") return typeof r.source === "string" && r.source ? r.source : "share";
+    if (col === "needs_review") return r.needs_review == null ? 0 : r.needs_review;
+    const v = r[col];
+    return v === undefined ? null : v;
+  });
+  return { ok: true, values };
+}
+
+app.post("/api/import", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { scores?: unknown } | null;
+  if (!body || !Array.isArray(body.scores)) {
+    return c.json({ error: "body must be {scores: [...]} (the export JSON format)" }, 400);
+  }
+  const errors: { index: number; reason: string }[] = [];
+  const valid: { id: string; image_hash: string | null; values: unknown[] }[] = [];
+  const seenIds = new Set<string>();
+  const seenHashes = new Set<string>();
+  let skipped = 0;
+  body.scores.forEach((row, index) => {
+    const v = validateImportRow(row);
+    if (!v.ok) {
+      errors.push({ index, reason: v.reason });
+      return;
+    }
+    const r = row as Record<string, unknown>;
+    const id = r.id as string;
+    const hash = typeof r.image_hash === "string" && r.image_hash ? r.image_hash : null;
+    if (seenIds.has(id) || (hash && seenHashes.has(hash))) {
+      skipped += 1;
+      return;
+    }
+    seenIds.add(id);
+    if (hash) seenHashes.add(hash);
+    valid.push({ id, image_hash: hash, values: v.values });
+  });
+
+  // Duplicates already in the DB (by id or image_hash).
+  const existingIds = new Set<string>();
+  const existingHashes = new Set<string>();
+  const ids = [...new Set(valid.map((v) => v.id))];
+  const hashes = [...new Set(valid.map((v) => v.image_hash).filter((h): h is string => !!h))];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const { results } = await c.env.DB
+      .prepare(`SELECT id FROM scores WHERE id IN (${chunk.map(() => "?").join(", ")})`)
+      .bind(...chunk)
+      .all<{ id: string }>();
+    for (const r of results) existingIds.add(r.id);
+  }
+  if (hashes.length > 0) {
+    try {
+      for (let i = 0; i < hashes.length; i += 100) {
+        const chunk = hashes.slice(i, i + 100);
+        const { results } = await c.env.DB
+          .prepare(`SELECT image_hash FROM scores WHERE image_hash IN (${chunk.map(() => "?").join(", ")})`)
+          .bind(...chunk)
+          .all<{ image_hash: string }>();
+        for (const r of results) existingHashes.add(r.image_hash);
+      }
+    } catch {
+      // image_hash column missing (migration 0002 not applied): skip hash dedupe.
+    }
+  }
+
+  const toInsert = valid.filter((v) => {
+    if (existingIds.has(v.id)) {
+      skipped += 1;
+      return false;
+    }
+    if (v.image_hash && existingHashes.has(v.image_hash)) {
+      skipped += 1;
+      return false;
+    }
+    return true;
+  });
+
+  let imported = 0;
+  const insertErrors: { index: number; reason: string }[] = [];
+  if (toInsert.length > 0) {
+    const stmt = c.env.DB.prepare(
+      `INSERT INTO scores (${IMPORT_COLUMNS.join(", ")}) VALUES (${IMPORT_COLUMNS.map(() => "?").join(", ")})`,
+    );
+    const BATCH = 100;
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      const chunk = toInsert.slice(i, i + BATCH);
+      try {
+        await c.env.DB.batch(chunk.map((v) => stmt.bind(...v.values)));
+        imported += chunk.length;
+      } catch (e) {
+        // Batch is atomic: the whole chunk failed (e.g. schema mismatch).
+        for (const v of chunk) {
+          insertErrors.push({
+            index: body.scores.findIndex((row) => (row as Record<string, unknown>)?.id === v.id),
+            reason: `insert failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+      }
+    }
+  }
+  return c.json({
+    imported,
+    skipped,
+    errors: [...errors, ...insertErrors].slice(0, 20),
+    error_count: errors.length + insertErrors.length,
+  });
 });
 
 // ---- export: full score history as a downloadable JSON backup ----

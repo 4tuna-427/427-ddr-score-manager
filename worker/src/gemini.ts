@@ -3,6 +3,41 @@ import type { Extraction } from "./lib";
 export interface GeminiEnv {
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
+  /** Optional comma-separated override for the whole model priority list. */
+  GEMINI_MODELS?: string;
+}
+
+/** Default model priority: current primary, then the fallback. */
+export const DEFAULT_GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"];
+
+/**
+ * Ordered model list for extraction. GEMINI_MODELS (comma-separated) wins
+ * when set; otherwise GEMINI_MODEL comes first, followed by the defaults
+ * (deduplicated). Never empty.
+ */
+export function resolveModelList(env: GeminiEnv): string[] {
+  const list: string[] = [];
+  const push = (m?: string | null) => {
+    const v = (m ?? "").trim();
+    if (v && !list.includes(v)) list.push(v);
+  };
+  if (env.GEMINI_MODELS) {
+    for (const m of env.GEMINI_MODELS.split(",")) push(m);
+  } else {
+    push(env.GEMINI_MODEL);
+    for (const m of DEFAULT_GEMINI_MODELS) push(m);
+  }
+  return list.length ? list : [...DEFAULT_GEMINI_MODELS];
+}
+
+/** Transient statuses worth retrying within one model. */
+export function isRetryableStatus(status: number): boolean {
+  return status === 503 || status === 429;
+}
+
+/** Statuses that mean "this model cannot serve the request, try the next". */
+export function isModelFallbackStatus(status: number): boolean {
+  return status === 404 || status === 503 || status === 429;
 }
 
 export const GEMINI_PROMPT = "# Gemini 抽出プロンプト v0.1（Phase 0 検証用）\n\nあなたは DanceDanceRevolution（DDR）のリザルト画面の写真から数値を転記する専門の読み取り器です。推測や補完はせず、画面に実際に表示されているものだけを転記してください。\n\n## 対象範囲\n- 対象は写真中央のメインモニター内に表示されたリザルトUIだけです。\n- モニターの外枠、周囲に映り込む他の筐体の画面、天井照明やその反射は無視してください。\n- 斜め撮影や反射で判読できない項目は、推測せず null にしてください。\n\n## 楽曲情報\n- `song_title`: 画面表示の曲名を一字一句そのまま転記してください（記号・大文字小文字も保持）。\n- `play_style`: SINGLE PLAY なら \"SP\"、DOUBLE PLAY なら \"DP\"。判別できなければ null。\n- `jacket_bbox`: ジャケット画像の位置を、画像全体を 0〜1000 とした [x_min, y_min, x_max, y_max] で返してください。無ければ null。\n\n## プレイヤー情報（最重要）\n- 画面左側のプレイヤーを `player_1`、右側を `player_2` に入れてください。あなたが「どちらが撮影者か」を判断する必要はありません。\n- 片側しか表示されていない場合、もう片方は null にしてください。`is_versus` は両側ある場合のみ true。\n- 各プレイヤーについて次を転記してください:\n  - `dancer_name`: ダンサーネーム表示そのまま\n  - `difficulty`: BEGINNER / BASIC / DIFFICULT / EXPERT / CHALLENGE のいずれか（画面の難易度表記に対応）\n  - `level`: 難易度レベル（数値）\n  - `score`: 通常スコア（カンマなし整数、0〜1,000,000）\n  - `ex_score`: EX SCORE\n  - `rank`: AAA / AA+ / AA / AA- / A+ / A / A- / B+ / B / B- / C+ / C / C- / D+ / D / E\n  - `clear_lamp`: MFC / PFC / GFC / FC / LIFE4 / CLEAR / FAILED（フルコンボ等のランプ表記から）\n  - `flare_rank`: EX / IX / VIII / VII / VI / V / IV / III / II / I / NONE（FLAREゲージのランク）\n  - `flare_skill`: フレアスキル数値\n  - `max_combo`: MAX COMBO\n  - 判定内訳: `marvelous` / `perfect` / `great` / `good` / `ok` / `miss`\n    - `ok` はフリーズアロー等の OK 判定の合計です。NG は miss 側の表示と混同しないでください。\n  - `fast_count` / `slow_count`: FAST / SLOW の合計表示があればその数値\n\n## 数値の注意\n- 数字の読み取りでは 8/6/9/0、1/7 を特に慎重に確認してください。\n- 桁区切りカンマや先行ゼロは除いて整数で返してください。\n- 表示されていない項目は 0 ではなく null です。\n\n- ダンサーネームは画面上部のプレイヤー情報バナー内の文字列だけを読むこと。画面の端や背景に映り込んだ反射文字は読まないこと。\n";
@@ -345,13 +380,17 @@ function bytesToBase64(bytes: Uint8Array): string {
 /**
  * Send one result-screen image to Gemini with Structured Outputs
  * and return the parsed extraction.
+ *
+ * Models are tried in priority order (see resolveModelList). Within one
+ * model, transient 503/429 errors are retried with backoff; when a model
+ * is exhausted (404 = model unavailable, or retries used up on 503/429),
+ * the next model is tried. Other errors (400/401/403/...) fail fast.
  */
 export async function extractFromImage(
   env: GeminiEnv,
   image: Blob,
 ): Promise<Extraction> {
-  const model = env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const models = resolveModelList(env);
   const buf = new Uint8Array(await image.arrayBuffer());
   const body = {
     contents: [
@@ -372,29 +411,45 @@ export async function extractFromImage(
   // "high demand" errors in bursts. Retry those (and 429) with backoff
   // inside the request so the client rarely sees them.
   const RETRY_DELAYS_MS = [1500, 4000, 9000];
-  let res: Response | null = null;
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-        body: JSON.stringify(body),
-      });
-    } catch (e) {
-      if (attempt === RETRY_DELAYS_MS.length) throw e;
-      res = null;
+  let lastError: Error | null = null;
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    let res: Response | null = null;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+          body: JSON.stringify(body),
+        });
+      } catch (e) {
+        if (attempt === RETRY_DELAYS_MS.length) {
+          lastError = e instanceof Error ? e : new Error(String(e));
+          res = null;
+          break;
+        }
+        res = null;
+      }
+      if (res && res.ok) break;
+      if (res && !isRetryableStatus(res.status)) break;
+      if (attempt === RETRY_DELAYS_MS.length) break;
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
     }
-    if (res && res.ok) break;
-    if (res && res.status !== 503 && res.status !== 429) break;
-    if (attempt === RETRY_DELAYS_MS.length) break;
-    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+    if (res && res.ok) {
+      const data: any = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Gemini API returned no content");
+      return JSON.parse(text) as Extraction;
+    }
+    if (res) {
+      const text = await res.text();
+      lastError = new Error(`Gemini API error ${res.status} (model ${model}): ${text.slice(0, 500)}`);
+      // Only fall through to the next model for 404/503/429; anything
+      // else (bad key, bad request, ...) would fail the same way there.
+      if (!isModelFallbackStatus(res.status)) throw lastError;
+    }
+    // Network failure with no response: also try the next model, since a
+    // per-model endpoint problem is possible (and cheap to rule out).
   }
-  if (!res || !res.ok) {
-    const text = res ? await res.text() : "";
-    throw new Error(`Gemini API error ${res ? res.status : "network"}: ${text.slice(0, 500)}`);
-  }
-  const data: any = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini API returned no content");
-  return JSON.parse(text) as Extraction;
+  throw lastError ?? new Error("Gemini API error: no model responded");
 }

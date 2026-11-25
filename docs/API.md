@@ -98,6 +98,15 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - `by_level`: `{play_style, level, ...バケット}`（SP→DP、レベル降順）。`by_category`: `{category, ...バケット}`（GOLD/WHITE/CLASSIC の順、カテゴリは曲のバージョンで判定）。
 - `monthly`: 直近12か月（JST）`{month: "YYYY-MM", plays, pb_updates}`。`pb_updates` は既プレイ譜面の自己ベスト更新回数（初プレイは含まない）。chart_id 未紐付けのプレイは totals.plays と monthly.plays にのみ数える。
 
+### GET /api/close-calls
+→ あと少しリスト `{items}`。各譜面のベストスコアのプレイから、AAA（990,000点）まで 10,000 点以内のものと、次のランプまで判定 5 個以内のものを抽出する（`kind: "aaa" | "lamp"`、`gap` は AAA までの点数差または次ランプまでの判定数、`next_lamp` はランプ種のみ付く）。ランプの距離は lib の `lampGap`（CLEAR/LIFE4→FC は Miss 数、FC→GFC は Great+Good−1、GFC→PFC は Great+Good、PFC→MFC は Perfect 数。FAILED は対象外）。ランプ種を先に、各グループ内で gap 昇順。譜面は1件につき最大2エントリ（aaa/lamp）。各 item には曲名・アーティスト・譜面情報が付く。
+
+### POST /api/import
+→ エクスポート JSON（`{scores: [...]}`、GET /api/export の形式）の取り込み。`{imported, skipped, errors, error_count}` を返す。
+- 形式検証: `id`（必須・文字列）、`score`（0〜1,000,000の整数）、`played_at`（正の整数・epoch ms）、`play_style`（SP/DP）、`difficulty`（必須）、その他は整数/null・文字列/null の型チェック。不適合の行は `errors`（最大20件、`{index, reason}`）に記録し取り込まない。
+- 重複排除: 同じ `id` または同じ `image_hash`（非 null の場合）の行はスキップする（`skipped` に数える）。ペイロード内の重複も同様。export に含まれる結合フィールド（song_title / artist / chart_max_ex）は無視する。
+- 取り込みは 100 件ずつのバッチで INSERT する。失敗したバッチの行は `errors` に記録する（image_hash 列が無い DB では失敗するため、migration 0002 適用済みであること）。
+
 ### GET /api/export
 → 全スコア（songs 結合つき、played_at 昇順）を `{exported_at, count, scores}` で返す。`Content-Disposition: attachment` つきのバックアップ用JSON。
 
@@ -128,7 +137,8 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 自動同期: Worker の Cron Trigger（毎日 04:00 JST、wrangler.toml の `[triggers]`）が同じ処理を実行する。失敗時は Worker のログに `[cron sync] failed:` が残る（手動エンドポイントはフォールバック）。
 
 ## Gemini 連携
-- エンドポイント: `POST https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent`、ヘッダ `x-goog-api-key: {GEMINI_API_KEY}`（どちらも Workers 環境変数/シークレット。GEMINI_MODEL 既定 gemini-3.5-flash-lite）
+- エンドポイント: `POST https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent`、ヘッダ `x-goog-api-key: {GEMINI_API_KEY}`（どちらも Workers 環境変数/シークレット。GEMINI_MODEL 既定 gemini-3.5-flash-lite）
+- モデルフォールバック: モデルは優先順リストで試す。既定は `gemini-3.5-flash-lite` → `gemini-2.5-flash-lite`。`GEMINI_MODEL`（wrangler.toml の `[vars]`）でプライマリを変更でき、`GEMINI_MODELS`（カンマ区切り、シークレット/変数で設定）に指定するとリスト全体を上書きする。各モデル内では 503/429 を最大3回リトライ（1.5s/4s/9s）し、404 またはリトライ切れの 503/429 で次モデルへ移る。400/401/403 などは即失敗する。
 - プロンプトとスキーマは Phase 0 の確定版を使う: `../../phase0/prompt.md` の内容（＋ダンサーネームは上部バナーのみ読む旨の1行追加）と `../../phase0/gemini_schema_api.json`。worker のソース内に定数として埋め込む。
 - 画像は base64 で inline_data として送る。mime は受け取ったファイルの type を使う。
 

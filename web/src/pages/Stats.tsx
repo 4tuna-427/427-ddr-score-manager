@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { getStats, type AchievementBucket, type StatsResponse } from '../lib/api'
+import { getCloseCalls, getStats, type AchievementBucket, type CloseCall, type StatsResponse } from '../lib/api'
 import { useIsDark } from '../lib/theme'
+import { DiffBadge } from '../components/DiffBadge'
 
 function LampCounts({ b }: { b: AchievementBucket }) {
   return (
@@ -30,11 +32,13 @@ export function StatsPage() {
   const [data, setData] = useState<StatsResponse | null>(null)
   const [error, setError] = useState('')
   const [style, setStyle] = useState<'SP' | 'DP'>('SP')
+  const [closeCalls, setCloseCalls] = useState<CloseCall[] | null>(null)
 
   useEffect(() => {
     getStats()
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
+    getCloseCalls().then((r) => setCloseCalls(r.items)).catch(() => setCloseCalls([]))
   }, [])
 
   if (error) return <p className="error">{error}</p>
@@ -47,6 +51,32 @@ export function StatsPage() {
   return (
     <div>
       <h2>統計・達成状況</h2>
+
+      <section className="card">
+        <h3>あと少しリスト</h3>
+        {closeCalls === null ? (
+          <p className="muted">読み込み中…</p>
+        ) : closeCalls.length === 0 ? (
+          <p className="muted">AAA・次ランプまで僅差の譜面はありません。</p>
+        ) : (
+          <ul className="update-list">
+            {closeCalls.map((cc) => (
+              <li key={`${cc.chart_id}-${cc.kind}`}>
+                <Link to={`/charts/${encodeURIComponent(cc.chart_id)}`}>
+                  <span className="update-title">{cc.song_title || '(曲名不明)'}</span>
+                  <DiffBadge style={cc.play_style} difficulty={cc.difficulty} level={cc.level} />
+                  <span className="update-score">
+                    {cc.kind === 'aaa'
+                      ? `AAAまであと ${cc.gap.toLocaleString()}点`
+                      : `${cc.next_lamp}まであと ${cc.gap}判定`}
+                    <span className="muted">（{cc.score.toLocaleString()}・{cc.clear_lamp || '—'}）</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <div className="stat-tiles">
         <div className="stat-tile"><span className="stat-tile-num">{t.plays}</span><span className="stat-tile-label">総プレイ数</span></div>

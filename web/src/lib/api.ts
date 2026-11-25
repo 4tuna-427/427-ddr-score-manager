@@ -253,6 +253,49 @@ export function getStats(): Promise<StatsResponse> {
   return request('/api/stats')
 }
 
+export interface CloseCall {
+  chart_id: string
+  kind: 'aaa' | 'lamp'
+  gap: number
+  next_lamp?: string
+  score: number
+  rank: string | null
+  clear_lamp: string | null
+  song_title: string | null
+  artist: string | null
+  play_style: string
+  difficulty: string
+  level: number | null
+}
+
+export function getCloseCalls(): Promise<{ items: CloseCall[] }> {
+  return request('/api/close-calls')
+}
+
+export interface ImportResult {
+  imported: number
+  skipped: number
+  errors: { index: number; reason: string }[]
+  error_count: number
+}
+
+export async function importScores(payload: unknown): Promise<ImportResult> {
+  const base = getApiBaseUrl()
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  const token = getApiToken()
+  if (token) headers.set('X-API-Token', token)
+  const res = await fetch(`${base}/api/import`, { method: 'POST', headers, body: JSON.stringify(payload) })
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try {
+      const body = await res.json()
+      if (body && body.error) msg = body.error
+    } catch { /* keep default */ }
+    throw new ApiError(res.status, msg)
+  }
+  return (await res.json()) as ImportResult
+}
+
 export function getChartHistory(chartId: string): Promise<ChartHistory> {
   return request(`/api/charts/${encodeURIComponent(chartId)}/history`)
 }
