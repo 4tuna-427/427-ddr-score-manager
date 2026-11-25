@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  getScore, linkChart, patchScore, searchSongs, selectPlayer,
+  deleteScore, getScore, linkChart, patchScore, searchSongs, selectPlayer,
   type Score, type SongSearchItem,
 } from '../lib/api'
 import { fmtDate } from '../components/ScoreList'
+import { diffLabel } from '../components/DiffBadge'
 import { JudgeBar } from '../components/JudgeBar'
 import { exRatePercent } from '../lib/stats'
 
@@ -31,6 +32,7 @@ const TEXT_FIELDS: { key: keyof Score; label: string }[] = [
 
 export function ScoreDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [score, setScore] = useState<Score | null>(null)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
@@ -138,7 +140,7 @@ export function ScoreDetailPage() {
     <div>
       <h1>{score.song_title || score.raw_title || '(曲名不明)'}</h1>
       <p className="muted">
-        {score.artist || ''} / {score.play_style} {score.difficulty} Lv.{score.level ?? '?'} / {fmtDate(score.played_at)}
+        {score.artist || ''} / {diffLabel(score.play_style, score.difficulty, score.level)} / {fmtDate(score.played_at)}
       </p>
       {score.needs_review === 1 && <p className="warn">⚠ 要確認（EX検算: {score.ex_check || '-'}、判定合計: {score.judge_sum_check || '-'}）</p>}
 
@@ -150,7 +152,7 @@ export function ScoreDetailPage() {
 
       <div className="card">
         <h2>判定割合</h2>
-        {exRatePercent(score) != null && <p className="muted">EX達成率 {exRatePercent(score)}%（EX {score.ex_score?.toLocaleString()} / 最大 {score.chart_max_ex?.toLocaleString()}）</p>}
+        {exRatePercent(score) != null && <p className="muted">EXスコア達成率 {exRatePercent(score)}%（EXスコア {score.ex_score?.toLocaleString()} / 最大 {score.chart_max_ex?.toLocaleString()}）</p>}
         <JudgeBar score={score} />
       </div>
 
@@ -171,6 +173,18 @@ export function ScoreDetailPage() {
       {!score.chart_id && (
         <div className="card">
           <h2>曲を紐付ける</h2>
+          {(score.candidates ?? []).length > 0 && (
+            <>
+              <p className="muted">読み取り曲名に近い候補：</p>
+              <div className="review-actions">
+                {(score.candidates ?? []).map((cand) => (
+                  <button key={cand.chart_id} type="button" disabled={busy} onClick={() => onLink(cand.chart_id)}>
+                    {cand.title}（一致度 {Math.round(cand.score * 100)}%）でリンク
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           <div className="row">
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="曲名で検索" />
             <button type="button" onClick={onSearch}>検索</button>
@@ -184,7 +198,7 @@ export function ScoreDetailPage() {
                 <div className="row wrap">
                   {song.charts.map((c) => (
                     <button key={c.chart_id} type="button" disabled={busy} onClick={() => onLink(c.chart_id)}>
-                      {c.play_style} {c.difficulty} Lv.{c.level ?? '?'}
+                      {diffLabel(c.play_style, c.difficulty, c.level)}
                     </button>
                   ))}
                 </div>
@@ -199,6 +213,30 @@ export function ScoreDetailPage() {
           <Link to={`/charts/${encodeURIComponent(score.chart_id)}`}>この譜面のスコア遷移グラフを見る</Link>
         </p>
       )}
+
+      <div className="card">
+        <h2>記録の削除</h2>
+        <p className="muted">曲として存在しない記録（誤読など）を消す場合に使います。元に戻せません。</p>
+        <button
+          type="button"
+          className="danger"
+          disabled={busy}
+          onClick={async () => {
+            if (!id) return
+            if (!window.confirm('この記録を削除しますか？元に戻せません。')) return
+            setBusy(true)
+            try {
+              await deleteScore(id)
+              navigate('/review')
+            } catch (e: any) {
+              setError(e.message)
+              setBusy(false)
+            }
+          }}
+        >
+          この記録を削除
+        </button>
+      </div>
     </div>
   )
 }

@@ -72,7 +72,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 重複検出: 受信画像バイト列の SHA-256 を scores.image_hash と照合し、一致したら Gemini を呼ばずに `409 {error:"duplicate", score_id}` を返す（migration 0002 適用後に有効。未適用時はチェックをスキップ）。
 - 処理: 画像を長辺1600px相当のまま Gemini に送信（Workers では受け取った Blob をそのまま中継し、リサイズはフロント側で行う前提。未リサイズでも受け付ける）→ 抽出 → 自プレイヤー確定 → 曲名寄せ → 検算 → D1保存。
 - 自プレイヤー確定: 環境変数 `MY_DANCER_NAME`（例 4TUNA）と正規化比較（大文字小文字無視、前後空白除去）で一致したプレイヤーを採用。ソロは player_1。バーサスで両方一致しない場合は player_1 を仮採用し `needs_review=1`、`raw_extraction` に全体を保存。
-- 曲名寄せ: 抽出タイトルを正規化（NFKC、ゼロ幅除去、記号・空白除去、小文字化）して songs.title_normalized と完全一致を検索。一意なら chart を特定（play_style+difficulty）。複数候補・不一致なら chart_id=NULL、needs_review=1。
+- 曲名寄せ: 抽出タイトルを正規化（NFKC、ゼロ幅除去、記号・空白除去、小文字化）して songs.title_normalized と完全一致を検索。一意なら chart を特定（play_style+difficulty）。完全一致が無い場合はあいまい照合（末尾の【アーティスト】等の除去、混同しやすい文字 1/l/i・0/o の畳み込み、編集距離ベースの類似度）にフォールバックし、類似度 0.90 以上で2位に明確な差がある場合のみ自動で紐付ける。それ以外は chart_id=NULL、needs_review=1（要確認画面に候補が提示される）。
 - 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes+shock を比較（charts が無い/notes が無い場合は 'no_master'）。不一致は needs_review=1。
 - レスポンス 201: `{score: <scores行>, previous: {score, ex_score, diff, played_at} | null}`（previous は同一 chart の直前レコード）
 
@@ -90,11 +90,12 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 → `{versions: [...]}`（songs に存在するバージョン一覧、絞り込みUI用）
 
 ### GET /api/summary/latest-day
-→ 直近のプレイ日（JST基準）のサマリ `{date, total_plays, unique_charts, updates}`。`updates` はその日に自己ベストを更新した譜面（同日複数プレイは最良のみ）で、各要素はスコア行＋ `prev_best`（その日より前の自己ベスト）/ `diff` / `is_new`（初プレイ）。スコアが無い場合は `date: null`。
+→ 直近のプレイ日（JST基準）のサマリ `{date, total_plays, unique_charts, updates}`。`updates` はその日に自己ベストを更新した譜面（同日複数プレイは最良のみ、played_at 降順＝新しい順）で、各要素はスコア行＋ `prev_best`（その日より前の自己ベスト）/ `diff` / `is_new`（初プレイ）。スコアが無い場合は `date: null`。
 ※ スコア行には `chart_max_ex`（譜面の最大EXスコア）が付く（scores 一覧・詳細・export・summary 共通）。EX達成率は `ex_score / chart_max_ex` でクライアントが算出する。
 
 ### GET /api/stats
-→ 統計・達成状況 `{totals, by_level, by_category, monthly, ex_rate_by_level, calendar}`。
+→ 統計・達成状況 `{totals, by_level, by_category, monthly, ex_rate_by_level, calendar, flare}`。
+- `flare`: 譜面ごとの最高フレアランク（I=1..IX=9, EX=10）の分布 `{by_rank: [{flare_rank, charts}]（強い順）, charts_with_flare}`。フレアランクが無いプレイは対象外。
 - 集計単位は譜面ごとのベスト達成：ランプとランクは「ベストスコアのプレイ」ではなく全プレイ中の最良を採用（低スコアでもFCしたプレイがあればFC扱い）。LIFE4 はクリア扱いで FC には数えない。
 - `totals`: 全譜面に対するバケット＋ `plays`（総プレイ数）/ `play_days`（JSTのプレイ日数）/ `aaa`（ベストランクAAAの譜面数）/ `max_clear_level`（クリア済み最大レベル、無ければ null）。
 - バケット共通フィールド: `total_charts`（マスタ譜面数）/ `played` / `clear` / `fc` / `gfc` / `pfc` / `mfc`（各しきい値以上の譜面数）。
@@ -130,8 +131,15 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 
 ### GET /api/scores?limit=50&offset=0&needs_review=0|1
 → `{items: [<scores行 + song_title, artist>], total}`（played_at 降順）
+- chart_id が NULL の行には `candidates`（あいまい照合の上位候補、最大3件: `{chart_id, song_id, title, artist, score}`。その行の play_style/difficulty の譜面が存在する候補のみ）が付く。要確認画面のワンタップリンク用。
 
-### GET /api/scores/:id → `{score}`
+### GET /api/scores/:id → `{score}`（未リンク時は `candidates` が付く）
+
+### DELETE /api/scores/:id
+- スコア記録を削除する（存在しない曲名の誤読レコード等の除去用）。→ `{ok: true}`、無ければ 404。
+
+### POST /api/admin/relink
+- chart_id が NULL の全スコアについて曲名寄せ（完全一致＋あいまい照合）を再実行し、特定できたものを紐付けて検算を再実行する。→ `{checked, linked, remaining}`
 
 ### PATCH /api/scores/:id
 - ボディ: 修正したいフィールドのみ（score, ex_score, marvelous..miss, ok, rank, clear_lamp, flare_rank, max_combo, fast_count, slow_count, difficulty, level）
@@ -169,6 +177,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - Vite + React + TypeScript。PWA: Web App Manifest（`share_target` は POST + multipart、action `/share`）＋ Service Worker（share の POST を受けて IndexedDB に保存し `/upload` へリダイレクトする定番方式）。ライブラリは vite-plugin-pwa を使ってよい。
 - 画像送信前にブラウザ側で長辺1000px・WebP（quality 0.82）に変換する。
 - オフライン時: 送信キューを IndexedDB に保持し、オンライン復帰時に自動再送する（最低限、キュー一覧と手動再送ボタンでも可だが自動再送まで実装する）。
-- 画面: (1) ホーム/アップロード（ファイル選択＋キュー状態） (2) 登録結果はアップロード直後に表示（前回比diff） (3) 履歴一覧（曲名・難易度・スコア・日付、needs_review バッジ） (4) スコア詳細（数値タップで編集→PATCH、バーサス時はプレイヤー切替、未紐付け時は曲検索→link） (5) 譜面別グラフ（履歴から遷移、Recharts の LineChart でスコア遷移） (6) 要確認一覧（needs_review=1 のみ） (7) 設定（APIトークン、APIベースURL）
+- 画面: (1) ホーム/アップロード（送信フォームを最上部に配置、ファイル選択＋キュー状態。送信エラーの詳細は画面に出さず設定のエラーログに記録） (2) 登録結果はアップロード直後に表示（前回比diff） (3) 履歴一覧（曲名・難易度・スコア・日付、needs_review バッジ） (4) スコア詳細（数値タップで編集→PATCH、バーサス時はプレイヤー切替、未紐付け時は候補ワンタップ／曲検索→link、記録の削除） (5) 譜面別グラフ（履歴から遷移、Recharts の LineChart でスコア遷移） (6) 要確認一覧（needs_review=1 のみ。再マッチング、候補リンク、削除） (7) 設定（APIトークン、APIベースURL、テーマ、バックアップ/復元、エラーログ）
+- 難易度表記: バッジ・ラベルはプレイヤー表記（難易度頭文字＋SP/DP＋レベル、例 `CSP 17`、BEGINNER は小文字 `bSP`）を使う。「EX」は EXスコア と明記し、フレアランクEX・フレアゲージEX と混同しない。
 - APIベースURL: 開発時は相対 `/api` でよいが、Pages と Workers が別ドメインになる構成を想定し、設定で変更可能にする（localStorage、既定は空＝相対）。
 - デザインは質素でよい。モバイル幅優先。

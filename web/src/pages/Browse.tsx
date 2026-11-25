@@ -128,7 +128,7 @@ export function BrowsePage() {
                     <>
                       <span className="score-row-score">{it.best_score.toLocaleString()}</span>
                       <span className="muted">
-                        {it.best_rank || ''}{it.best_lamp ? ` / ${it.best_lamp}` : ''}{rate != null ? ` ・ EX ${rate}%` : ''}
+                        {it.best_rank || ''}{it.best_lamp ? ` / ${it.best_lamp}` : ''}{rate != null ? ` ・ EXスコア ${rate}%` : ''}
                       </span>
                     </>
                   ) : (

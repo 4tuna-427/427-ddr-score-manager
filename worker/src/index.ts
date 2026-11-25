@@ -12,6 +12,8 @@ import {
   jstDayStartMs,
   computeDayUpdates,
   computeStats,
+  rankTitleCandidates,
+  bestTitleMatch,
   computeCloseCalls,
   computeVersus,
   findPhashCandidates,
@@ -128,13 +130,69 @@ async function findChartByTitle(
     .prepare("SELECT * FROM songs WHERE title_normalized = ?")
     .bind(norm)
     .all<SongRow>();
-  if (results.length !== 1) return { song: null, chart: null };
-  const song = results[0];
+  let song: SongRow | null = null;
+  if (results.length === 1) {
+    song = results[0];
+  } else if (results.length === 0) {
+    // Fuzzy fallback for OCR misreads (dropped/substituted characters,
+    // trailing artist credits like 【...】). Only a confident match links.
+    const { results: allSongs } = await db
+      .prepare("SELECT song_id, title, title_normalized FROM songs")
+      .all<{ song_id: string; title: string; title_normalized: string }>();
+    const match = bestTitleMatch(rawTitle, allSongs);
+    if (match) {
+      song = await db
+        .prepare("SELECT * FROM songs WHERE song_id = ?")
+        .bind(match.song_id)
+        .first<SongRow>();
+    }
+  }
+  if (!song) return { song: null, chart: null };
   const chart = await db
     .prepare("SELECT * FROM charts WHERE chart_id = ?")
     .bind(makeChartId(song.song_id, playStyle, difficulty))
     .first<ChartDbRow>();
   return { song, chart: chart ?? null };
+}
+
+/**
+ * For unlinked score rows, attach ranked link candidates (fuzzy title
+ * matches whose song has a chart for the row's style/difficulty), so the
+ * review UI can offer one-tap linking.
+ */
+async function attachCandidates<T extends Record<string, any>>(db: D1Database, rows: T[]): Promise<T[]> {
+  const unlinked = rows.filter((r) => !r.chart_id && r.raw_title);
+  if (unlinked.length === 0) return rows;
+  const { results: allSongs } = await db
+    .prepare("SELECT song_id, title, title_normalized, artist FROM songs")
+    .all<{ song_id: string; title: string; title_normalized: string; artist: string | null }>();
+  const artistById = new Map(allSongs.map((s) => [s.song_id, s.artist]));
+  const byTitle = new Map<string, ReturnType<typeof rankTitleCandidates>>();
+  for (const r of unlinked) {
+    if (!byTitle.has(r.raw_title)) byTitle.set(r.raw_title, rankTitleCandidates(r.raw_title, allSongs, 3));
+  }
+  const songIds = [...new Set([...byTitle.values()].flat().map((cand) => cand.song_id))];
+  const chartByKey = new Map<string, string>();
+  if (songIds.length > 0) {
+    const placeholders = songIds.map(() => "?").join(", ");
+    const { results: charts } = await db
+      .prepare(`SELECT chart_id, song_id, play_style, difficulty FROM charts WHERE song_id IN (${placeholders})`)
+      .bind(...songIds)
+      .all<{ chart_id: string; song_id: string; play_style: string; difficulty: string }>();
+    for (const ch of charts) chartByKey.set(`${ch.song_id}|${ch.play_style}|${ch.difficulty}`, ch.chart_id);
+  }
+  for (const r of unlinked) {
+    const cands = (byTitle.get(r.raw_title) ?? [])
+      .map((cand) => {
+        const chart_id = chartByKey.get(`${cand.song_id}|${r.play_style}|${r.difficulty}`);
+        return chart_id
+          ? { chart_id, song_id: cand.song_id, title: cand.title, artist: artistById.get(cand.song_id) ?? null, score: cand.score }
+          : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    (r as Record<string, unknown>).candidates = cands;
+  }
+  return rows;
 }
 
 function buildFields(
@@ -324,12 +382,15 @@ app.get("/api/summary/latest-day", async (c) => {
       .all<{ chart_id: string; best: number }>();
     for (const r of prevRows) prevBest.set(r.chart_id, r.best);
   }
-  const updates = computeDayUpdates(dayRows, prevBest).map((u) => ({
-    ...u.row,
-    prev_best: u.prev_best,
-    diff: u.diff,
-    is_new: u.is_new,
-  }));
+  const updates = computeDayUpdates(dayRows, prevBest)
+    .map((u) => ({
+      ...u.row,
+      prev_best: u.prev_best,
+      diff: u.diff,
+      is_new: u.is_new,
+    }))
+    // Newest first on the Home screen.
+    .sort((a, b) => (b.played_at as number) - (a.played_at as number));
   return c.json({
     date,
     total_plays: dayRows.length,
@@ -348,7 +409,7 @@ app.get("/api/stats", async (c) => {
     )
     .all<{ chart_id: string; play_style: string; level: number | null; max_ex: number | null; version: string | null }>();
   const { results: playRows } = await c.env.DB
-    .prepare("SELECT chart_id, score, ex_score, rank, clear_lamp, played_at FROM scores")
+    .prepare("SELECT chart_id, score, ex_score, rank, clear_lamp, flare_rank, played_at FROM scores")
     .all<{ chart_id: string | null; score: number; ex_score: number | null; rank: string | null; clear_lamp: string | null; played_at: number }>();
   const master = masterRows.map((r) => ({
     chart_id: r.chart_id,
@@ -610,6 +671,7 @@ app.get("/api/scores", async (c) => {
     )
     .bind(...binds, limit, offset)
     .all();
+  await attachCandidates(c.env.DB, results as Record<string, any>[]);
   return c.json({ items: results, total: totalRow?.n ?? 0 });
 });
 
@@ -617,7 +679,17 @@ app.get("/api/scores", async (c) => {
 app.get("/api/scores/:id", async (c) => {
   const score = await getScore(c.env.DB, c.req.param("id"));
   if (!score) return c.json({ error: "not found" }, 404);
+  await attachCandidates(c.env.DB, [score as Record<string, any>]);
   return c.json({ score });
+});
+
+// ---- DELETE /api/scores/:id (remove a bogus/unlinkable record) ----
+app.delete("/api/scores/:id", async (c) => {
+  const id = c.req.param("id");
+  const row = await getScore(c.env.DB, id);
+  if (!row) return c.json({ error: "not found" }, 404);
+  await c.env.DB.prepare("DELETE FROM scores WHERE id = ?").bind(id).run();
+  return c.json({ ok: true });
 });
 
 // ---- PATCH /api/scores/:id ----
@@ -1051,6 +1123,38 @@ async function syncMaster(
   }
   return { songs: songs.length, charts: charts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length };
 }
+
+// ---- POST /api/admin/relink: re-run title matching for unlinked scores ----
+app.post("/api/admin/relink", async (c) => {
+  const { results: rows } = await c.env.DB
+    .prepare("SELECT * FROM scores WHERE chart_id IS NULL")
+    .all<Record<string, any>>();
+  let linked = 0;
+  for (const row of rows) {
+    const { song, chart } = await findChartByTitle(
+      c.env.DB, row.raw_title, row.play_style, row.difficulty,
+    );
+    if (!song || !chart) continue;
+    const merged: Record<string, any> = {
+      ...row,
+      chart_id: chart.chart_id,
+      song_id: chart.song_id,
+      play_style: chart.play_style,
+      difficulty: chart.difficulty,
+      level: chart.level,
+    };
+    const checks = recomputeChecks(merged, chart);
+    await c.env.DB
+      .prepare(
+        "UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?, ex_check = ?, judge_sum_check = ?, needs_review = ? WHERE id = ?",
+      )
+      .bind(chart.chart_id, chart.song_id, chart.play_style, chart.difficulty, chart.level,
+        checks.ex_check, checks.judge_sum_check, checks.needs_review, row.id)
+      .run();
+    linked += 1;
+  }
+  return c.json({ checked: rows.length, linked, remaining: rows.length - linked });
+});
 
 // ---- POST /api/admin/sync ----
 app.post("/api/admin/sync", async (c) => {

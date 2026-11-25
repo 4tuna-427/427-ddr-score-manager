@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { addQueueItem, deleteQueueItem, listQueueItems, updateQueueItem, type QueueItem } from './db'
 import { convertImage } from './image'
 import { analyzeImage, ApiError, type AnalyzeResult } from './api'
+import { addErrorLog } from './errorlog'
 import { estimateCaptureDate } from './exif'
 
 interface QueueContextValue {
@@ -66,10 +67,13 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             const dup: QueueItem = { ...next, status: 'duplicate', error: '同じ画像が既に登録されています' }
             await updateQueueItem(dup)
           } else {
+            // Keep the queue label generic; the full detail goes to the
+            // error log (Settings screen) instead of the Home screen.
+            addErrorLog(next.name, e)
             const failed: QueueItem = {
               ...next,
               status: 'error',
-              error: e instanceof Error ? e.message : String(e),
+              error: '送信に失敗しました（詳細は設定画面のエラーログに記録）',
             }
             await updateQueueItem(failed)
           }

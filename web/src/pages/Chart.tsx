@@ -170,7 +170,9 @@ export function ChartPage() {
         )}
       </div>
       <h2>履歴</h2>
-      <ScoreList items={[...items].reverse()} />
+      <div className="cap-list-lg">
+        <ScoreList items={[...items].reverse()} />
+      </div>
     </div>
   )
 }

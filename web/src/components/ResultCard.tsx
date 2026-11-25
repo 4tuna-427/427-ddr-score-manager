@@ -25,7 +25,7 @@ export function ResultCard({ result }: { result: AnalyzeResult }) {
       )}
       {s.ex_score != null && (
         <div className="muted">
-          EX {s.ex_score.toLocaleString()}
+          EXスコア {s.ex_score.toLocaleString()}
           {exRatePercent(s) != null && <> （達成率 {exRatePercent(s)}%）</>}
         </div>
       )}

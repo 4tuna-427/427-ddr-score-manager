@@ -47,6 +47,16 @@ export interface Score {
   song_title?: string | null
   artist?: string | null
   chart_max_ex?: number | null
+  /** Ranked link candidates for unlinked records (attached by the API). */
+  candidates?: LinkCandidate[]
+}
+
+export interface LinkCandidate {
+  chart_id: string
+  song_id: string
+  title: string
+  artist: string | null
+  score: number
 }
 
 export interface PreviousScore {
@@ -171,6 +181,14 @@ export function linkChart(id: string, chartId: string): Promise<{ score: Score }
   })
 }
 
+export function deleteScore(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/scores/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function relinkScores(): Promise<{ checked: number; linked: number; remaining: number }> {
+  return request('/api/admin/relink', { method: 'POST' })
+}
+
 export function searchSongs(q: string): Promise<{ items: SongSearchItem[] }> {
   return request(`/api/songs?q=${encodeURIComponent(q)}`)
 }
@@ -275,6 +293,7 @@ export interface StatsResponse {
   monthly: { month: string; plays: number; pb_updates: number; avg_ex_rate: number | null }[]
   ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[]
   calendar: { date: string; plays: number }[]
+  flare: { by_rank: { flare_rank: string; charts: number }[]; charts_with_flare: number }
 }
 
 export function getStats(): Promise<StatsResponse> {

@@ -105,7 +105,7 @@ export function StatsPage() {
         ) : closeCalls.length === 0 ? (
           <p className="muted">AAA・次ランプまで僅差の譜面はありません。</p>
         ) : (
-          <ul className="update-list">
+          <ul className="update-list cap-list">
             {closeCalls.map((cc) => (
               <li key={`${cc.chart_id}-${cc.kind}`}>
                 <Link to={`/charts/${encodeURIComponent(cc.chart_id)}`}>
@@ -143,7 +143,7 @@ export function StatsPage() {
         </div>
         <table className="level-table">
           <thead>
-            <tr><th>Lv</th><th>プレイ済み</th><th>クリア</th><th>FC</th><th>PFC</th><th>MFC</th><th>EX率</th></tr>
+            <tr><th>Lv</th><th>プレイ済み</th><th>クリア</th><th>FC</th><th>PFC</th><th>MFC</th><th>EXスコア率</th></tr>
           </thead>
           <tbody>
             {levels.map((r) => (
@@ -159,7 +159,7 @@ export function StatsPage() {
             ))}
           </tbody>
         </table>
-        <p className="muted">EX率は譜面ごとのベストEX率の平均（ノーツ数がある譜面のみ）。</p>
+        <p className="muted">EXスコア率は譜面ごとのベストEXスコア率の平均（ノーツ数がある譜面のみ）。</p>
       </section>
 
       <section className="card">
@@ -185,7 +185,7 @@ export function StatsPage() {
             <Bar dataKey="pb_updates" name="自己ベスト更新" fill={dark ? '#c9f7dd' : '#0b7a43'} />
           </BarChart>
         </ResponsiveContainer>
-        <h3>月別平均EX率</h3>
+        <h3>月別平均EXスコア率</h3>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={monthly} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#2b3a30' : '#d7e2da'} />
@@ -195,7 +195,7 @@ export function StatsPage() {
               contentStyle={dark ? { background: '#171f1a', border: '1px solid #2b3a30', color: '#e8f1ea' } : undefined}
               formatter={(v) => (v == null ? '—' : `${v}%`)}
             />
-            <Line type="monotone" dataKey="avg_ex_rate" name="平均EX率" stroke={dark ? '#6ddc99' : '#0b7a43'} strokeWidth={2} dot connectNulls />
+            <Line type="monotone" dataKey="avg_ex_rate" name="平均EXスコア率" stroke={dark ? '#6ddc99' : '#0b7a43'} strokeWidth={2} dot connectNulls />
           </LineChart>
         </ResponsiveContainer>
         <p className="muted">ノーツ数がある譜面のプレイのみ対象。月内に該当プレイが無い月は線が途切れます。</p>
@@ -204,6 +204,30 @@ export function StatsPage() {
       <section className="card">
         <h3>プレイカレンダー</h3>
         <CalendarHeatmap calendar={data.calendar} />
+      </section>
+
+      <section className="card">
+        <h3>フレアランク別 達成譜面数</h3>
+        {data.flare.charts_with_flare === 0 ? (
+          <p className="muted">フレアランクの記録がまだありません。</p>
+        ) : (
+          <>
+            <table className="level-table">
+              <thead>
+                <tr><th>フレアランク</th><th>譜面数</th></tr>
+              </thead>
+              <tbody>
+                {data.flare.by_rank.map((r) => (
+                  <tr key={r.flare_rank}>
+                    <td className="lv-cell">{r.flare_rank}</td>
+                    <td>{r.charts}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="muted">譜面ごとの最高フレアランクで集計（全{data.flare.charts_with_flare}譜面）。リザルト画面のバッジから読み取った記録です。</p>
+          </>
+        )}
       </section>
 
       <section className="card">
@@ -231,7 +255,7 @@ export function StatsPage() {
                 ))}
               </tbody>
             </table>
-            <ul className="update-list">
+            <ul className="update-list cap-list">
               {versus.recent.map((r) => (
                 <li key={r.score_id}>
                   <Link to={`/scores/${r.score_id}`}>

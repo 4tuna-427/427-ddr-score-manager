@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
 import { fetchExportBlob, getApiBaseUrl, getApiToken, importScores, setApiBaseUrl, setApiToken } from '../lib/api'
 import { getThemeMode, setThemeMode, type ThemeMode } from '../lib/theme'
+import { clearErrorLogs, listErrorLogs, removeErrorLog, type ErrorLogEntry } from '../lib/errorlog'
+import { fmtDate } from '../components/ScoreList'
 
 export function SettingsPage() {
   const [token, setToken] = useState(getApiToken())
@@ -10,6 +12,7 @@ export function SettingsPage() {
   const [exportMsg, setExportMsg] = useState('')
   const [importMsg, setImportMsg] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
+  const [errorLogs, setErrorLogs] = useState<ErrorLogEntry[]>(() => listErrorLogs())
 
   const doExport = async () => {
     try {
@@ -102,6 +105,38 @@ export function SettingsPage() {
           onChange={(e) => doImport(e.target.files?.[0])}
         />
         {importMsg && <span className="muted">{importMsg}</span>}
+      </div>
+      <div className="card">
+        <h2>エラーログ</h2>
+        <p className="muted">送信・解析に失敗したときの詳細をこの端末に記録します。30日を過ぎたものは自動で削除され、最大100件まで保持します。</p>
+        {errorLogs.length === 0 ? (
+          <p className="muted">エラーログはありません。</p>
+        ) : (
+          <>
+            <ul className="error-log-list cap-list">
+              {errorLogs.map((e) => (
+                <li key={e.id}>
+                  <div className="error-log-head">
+                    <span className="muted">{fmtDate(e.at)} / {e.context}</span>
+                    <button
+                      type="button"
+                      onClick={() => { removeErrorLog(e.id); setErrorLogs(listErrorLogs()) }}
+                    >
+                      削除
+                    </button>
+                  </div>
+                  <span className="error-log-msg">{e.message}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => { if (window.confirm('エラーログを全て削除しますか？')) { clearErrorLogs(); setErrorLogs([]) } }}
+            >
+              全て削除
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

@@ -15,6 +15,8 @@ import {
   judgeSumCheck,
   normalizeTitle,
   computeStats,
+  rankTitleCandidates,
+  bestTitleMatch,
   type Extraction,
 } from "../src/lib";
 
@@ -539,4 +541,63 @@ test("hammingDistanceHex and findPhashCandidates rank by distance", async () => 
   assert.equal(hammingDistanceHex("9af667693a15209e", pierce.phash_8!), 24);
   assert.equal(findPhashCandidates("9af667693a15209e", fixtureSongs, 5, 20).length, 0);
   assert.equal(findPhashCandidates("9af667693a15209e", fixtureSongs, 5, 24)[0]?.song.song_id, pierce.song_id);
+});
+
+const titleSongs = [
+  { song_id: "s1", title: "チルノのパーフェクトさんすう学園", title_normalized: normalizeTitle("チルノのパーフェクトさんすう学園") },
+  { song_id: "s2", title: "PARANOiA", title_normalized: normalizeTitle("PARANOiA") },
+  { song_id: "s3", title: "PARANOiA MAX～DIRTY MIX～", title_normalized: normalizeTitle("PARANOiA MAX～DIRTY MIX～") },
+  { song_id: "s4", title: "革命", title_normalized: normalizeTitle("革命") },
+  { song_id: "s5", title: "Electronic or Treat!", title_normalized: normalizeTitle("Electronic or Treat!") },
+];
+
+test("title matching: trailing artist credit in brackets still auto-matches", () => {
+  const m = bestTitleMatch("チルノのパーフェクトさんすう学園【ビートまりお】", titleSongs);
+  assert.equal(m?.song_id, "s1");
+  assert.ok((m?.score ?? 0) >= 0.99);
+});
+
+test("title matching: one dropped character auto-matches a long title", () => {
+  const m = bestTitleMatch("チルノのパーフェクトさんすう園", titleSongs);
+  assert.equal(m?.song_id, "s1");
+});
+
+test("title matching: confusable substitution (U1 read as Li1) surfaces as candidate", () => {
+  const cands = rankTitleCandidates("E1ectronic or Treat!", titleSongs);
+  assert.equal(cands[0]?.song_id, "s5");
+  const exact = bestTitleMatch("Electronic or Treat!", titleSongs);
+  assert.equal(exact?.song_id, "s5");
+});
+
+test("title matching: series titles are not confused with each other", () => {
+  assert.equal(bestTitleMatch("PARANOiA", titleSongs)?.song_id, "s2");
+  // A truncated read of the longer title is genuinely ambiguous: it must
+  // never auto-link, and both series entries surface as candidates.
+  assert.equal(bestTitleMatch("PARANOiA MAX", titleSongs), null);
+  const candIds = rankTitleCandidates("PARANOiA MAX", titleSongs).map((cand) => cand.song_id);
+  assert.ok(candIds.includes("s2") && candIds.includes("s3"));
+});
+
+test("title matching: unknown titles return no confident match", () => {
+  assert.equal(bestTitleMatch("Footnotes on BPM", titleSongs), null);
+  assert.equal(bestTitleMatch(null, titleSongs), null);
+});
+
+test("computeStats: flare distribution uses each chart's best flare rank", () => {
+  const master = [
+    { chart_id: "a|SP|EXPERT", play_style: "SP", level: 15, max_ex: 3000, category: "GOLD" as const },
+    { chart_id: "b|SP|EXPERT", play_style: "SP", level: 16, max_ex: 3000, category: "GOLD" as const },
+  ];
+  const plays = [
+    { chart_id: "a|SP|EXPERT", score: 900000, rank: "AA", clear_lamp: "CLEAR", flare_rank: "III", played_at: 1764000000000 },
+    { chart_id: "a|SP|EXPERT", score: 950000, rank: "AA+", clear_lamp: "CLEAR", flare_rank: "EX", played_at: 1764003600000 },
+    { chart_id: "b|SP|EXPERT", score: 800000, rank: "A", clear_lamp: "CLEAR", flare_rank: "IX", played_at: 1764007200000 },
+    { chart_id: "b|SP|EXPERT", score: 700000, rank: "B", clear_lamp: "FAILED", flare_rank: null, played_at: 1764010800000 },
+  ];
+  const s = computeStats(master as never, plays as never, 1764014400000);
+  assert.equal(s.flare.charts_with_flare, 2);
+  assert.deepEqual(s.flare.by_rank, [
+    { flare_rank: "EX", charts: 1 },
+    { flare_rank: "IX", charts: 1 },
+  ]);
 });

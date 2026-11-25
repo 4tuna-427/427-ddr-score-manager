@@ -74,6 +74,100 @@ const t = title
 return t.replace(/[\s\-_・.,!?'"“”‘’()（）\[\]/\\:：;；]/g, "").toLowerCase();
 }
 
+/** Remove trailing bracketed credits like 【ビートまりお】 / [artist] from a title. */
+export function stripBracketSuffix(title: string): string {
+  let t = title;
+  for (;;) {
+    const m = t.match(/^(.*?)\s*(?:【[^】]*】|\[[^\]]*\])\s*$/);
+    if (!m || !m[1]) return t;
+    t = m[1];
+  }
+}
+
+/** Fold common OCR confusables (1/l/i, 0/o) in an already-normalized title. */
+export function looseTitleKey(normalized: string): string {
+  return normalized.replace(/[li]/g, "1").replace(/o/g, "0");
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+function editRatio(a: string, b: string): number {
+  const max = Math.max(a.length, b.length);
+  return max === 0 ? 1 : 1 - levenshtein(a, b) / max;
+}
+
+export interface TitleCandidate {
+  song_id: string;
+  title: string;
+  score: number;
+}
+
+/**
+ * Rank master songs by similarity to an extracted (possibly misread) title.
+ * Exact normalized match = 1, bracket-stripped exact = 0.99, confusable-folded
+ * exact = 0.97; otherwise the best Levenshtein ratio across the raw/stripped
+ * and folded variants. Only candidates scoring >= 0.5 are returned.
+ */
+export function rankTitleCandidates(
+  rawTitle: string | null | undefined,
+  songs: { song_id: string; title: string; title_normalized: string }[],
+  limit = 3,
+): TitleCandidate[] {
+  if (!rawTitle) return [];
+  const norm = normalizeTitle(rawTitle);
+  if (!norm) return [];
+  const stripped = normalizeTitle(stripBracketSuffix(rawTitle));
+  const loose = looseTitleKey(norm);
+  const looseStripped = looseTitleKey(stripped);
+  const out: TitleCandidate[] = [];
+  for (const s of songs) {
+    const sn = s.title_normalized;
+    let score: number;
+    if (sn === norm) score = 1;
+    else if (sn === stripped) score = 0.99;
+    else if (looseTitleKey(sn) === loose || looseTitleKey(sn) === looseStripped) score = 0.97;
+    else {
+      score = Math.max(
+        editRatio(norm, sn),
+        editRatio(stripped, sn),
+        editRatio(loose, looseTitleKey(sn)),
+      );
+    }
+    if (score >= 0.5) out.push({ song_id: s.song_id, title: s.title, score: Math.round(score * 1000) / 1000 });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, limit);
+}
+
+/**
+ * Confident auto-match for an extracted title, or null. Requires a top
+ * score >= 0.90 with a clear margin over the runner-up, so near-identical
+ * distinct songs (remixes, series titles) are never guessed between.
+ */
+export function bestTitleMatch(
+  rawTitle: string | null | undefined,
+  songs: { song_id: string; title: string; title_normalized: string }[],
+): TitleCandidate | null {
+  const top = rankTitleCandidates(rawTitle, songs, 2);
+  if (top.length === 0 || top[0].score < 0.9) return null;
+  if (top.length > 1 && top[1].score >= 0.9 && top[0].score - top[1].score < 0.03) return null;
+  return top[0];
+}
+
 /** Theoretical EX score. Returns null when any required judgment is missing. */
 export function calcEx(p: Pick<PlayerExtraction, "marvelous" | "ok" | "perfect" | "great">): number | null {
 if (p.marvelous == null || p.ok == null || p.perfect == null || p.great == null) return null;
@@ -578,7 +672,13 @@ export interface StatPlay {
   clear_lamp: string | null;
   played_at: number;
   ex_score?: number | null;
+  flare_rank?: string | null;
 }
+
+/** Flare rank strength (the hexagon badge on the result screen): I=1 .. IX=9, EX=10. */
+export const FLARE_ORDER: Record<string, number> = {
+  I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, EX: 10,
+};
 
 export interface StatMasterChart {
   chart_id: string;
@@ -612,6 +712,8 @@ export interface StatsResult {
   ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[];
   /** Days with plays in the last 365 JST days (sparse; days without plays are omitted). */
   calendar: { date: string; plays: number }[];
+  /** Per-chart best flare rank distribution (strongest first). */
+  flare: { by_rank: { flare_rank: string; charts: number }[]; charts_with_flare: number };
 }
 
 const emptyBucket = (): AchievementBucket => ({
@@ -668,6 +770,7 @@ export function computeStats(
   const bestLamp = new Map<string, number>();
   const bestRank = new Map<string, number>();
   const bestEx = new Map<string, number>();
+  const bestFlare = new Map<string, number>();
   const playDays = new Set<string>();
   const playsByDay = new Map<string, number>();
 
@@ -687,6 +790,8 @@ export function computeStats(
     if (lamp > (bestLamp.get(p.chart_id) ?? -1)) bestLamp.set(p.chart_id, lamp);
     const rank = p.rank != null ? RANK_ORDER.indexOf(p.rank) : -1;
     if (rank > (bestRank.get(p.chart_id) ?? -1)) bestRank.set(p.chart_id, rank);
+    const flare = p.flare_rank != null ? (FLARE_ORDER[p.flare_rank] ?? -1) : -1;
+    if (flare > (bestFlare.get(p.chart_id) ?? -1)) bestFlare.set(p.chart_id, flare);
     if (p.ex_score != null) {
       if (p.ex_score > (bestEx.get(p.chart_id) ?? -1)) bestEx.set(p.chart_id, p.ex_score);
       const mx = chartMaxEx.get(p.chart_id);
@@ -781,7 +886,23 @@ export function computeStats(
     .map(([date, plays]) => ({ date, plays }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-  return { totals, by_level, by_category, monthly: months, ex_rate_by_level, calendar };
+  // Flare: per-chart best flare rank, strongest first (EX, IX, ..., I).
+  const flareCounts = new Map<number, number>();
+  for (const ch of masterCharts) {
+    const f = bestFlare.get(ch.chart_id);
+    if (f != null && f > 0) flareCounts.set(f, (flareCounts.get(f) ?? 0) + 1);
+  }
+  const flare = {
+    by_rank: [...flareCounts.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([v, charts]) => ({
+        flare_rank: Object.keys(FLARE_ORDER).find((k) => FLARE_ORDER[k] === v)!,
+        charts,
+      })),
+    charts_with_flare: [...flareCounts.values()].reduce((a, b) => a + b, 0),
+  };
+
+  return { totals, by_level, by_category, monthly: months, ex_rate_by_level, calendar, flare };
 }
 
 // ---- versus history ----

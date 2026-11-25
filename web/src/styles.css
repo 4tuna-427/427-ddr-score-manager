@@ -211,3 +211,16 @@ input[type="file"] { padding: 8px; width: 100%; }
 [data-theme="dark"] .cal-cell.cal-1 { background: #1f4d33; }
 [data-theme="dark"] .cal-cell.cal-2 { background: #2f9d63; }
 [data-theme="dark"] .cal-cell.cal-3 { background: #6ddc99; }
+
+/* Phase 2.5: capped lists on multi-section pages (scroll inside the box
+   instead of pushing later sections far down the page) */
+.cap-list { max-height: 300px; overflow-y: auto; }
+.cap-list-lg { max-height: 520px; overflow-y: auto; }
+
+/* Phase 2.5: review quick actions + error log + danger button */
+.review-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 2px; }
+button.danger { color: #c2272f; border-color: #c2272f; }
+.error-log-list { list-style: none; margin: 8px 0; padding: 0; }
+.error-log-list li { padding: 8px 0; border-top: 1px solid var(--line); }
+.error-log-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.error-log-msg { display: block; font-size: 12px; word-break: break-all; white-space: pre-wrap; }
