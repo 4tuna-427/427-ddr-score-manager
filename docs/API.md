@@ -106,6 +106,13 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - `recent`: 直近10件 `{score_id, opponent, song_title, my_score, opp_score, result, played_at}`（`result`: win/loss/draw/unknown）。
 - 対象外として安全にスキップする行: raw_extraction が無い/壊れている、バーサスでない、どちらも自名に一致しない、相手名が無い。`MY_DANCER_NAME` 未設定時は常に空を返す。
 
+### GET /api/targets / POST /api/targets / DELETE /api/targets/:chart_id
+→ 譜面ごとの目標設定（`targets` テーブル。migration 0003 が必要）。
+- `GET /api/targets` → `{items: [{chart_id, target_score, target_lamp, updated_at, song_title, artist, play_style, difficulty, level, best_score}]}`（曲名順）。`?chart_id=...` を付けると `{target: ... | null}` を返す。
+- `POST /api/targets` `{chart_id, target_score?, target_lamp?}` → upsert。`target_score` は 0〜1,000,000 の整数、`target_lamp` は CLEAR/LIFE4/FC/GFC/PFC/MFC のいずれか。どちらか一方は必須。存在しない chart_id は 404。レスポンス `{target}`（best_score 付き）。
+- `DELETE /api/targets/:chart_id` → `{deleted: true}`。目標が無ければ 404。
+- 進捗（ベストとの差）はクライアントが算出する。ベストランプは全プレイ中の最良（統計と同じ定義）。
+
 ### GET /api/close-calls
 → あと少しリスト `{items}`。各譜面のベストスコアのプレイから、AAA（990,000点）まで 10,000 点以内のものと、次のランプまで判定 5 個以内のものを抽出する（`kind: "aaa" | "lamp"`、`gap` は AAA までの点数差または次ランプまでの判定数、`next_lamp` はランプ種のみ付く）。ランプの距離は lib の `lampGap`（CLEAR/LIFE4→FC は Miss 数、FC→GFC は Great+Good−1、GFC→PFC は Great+Good、PFC→MFC は Perfect 数。FAILED は対象外）。ランプ種を先に、各グループ内で gap 昇順。譜面は1件につき最大2エントリ（aaa/lamp）。各 item には曲名・アーティスト・譜面情報が付く。
 

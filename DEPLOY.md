@@ -27,6 +27,12 @@ Phase 1.1 の Worker は scores.image_hash に書き込むため、**Worker を�
 ```bash
 npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0002_phase11.sql
 ```
+
+### 既存DBへの追加マイグレーション（Phase 2.3）
+Phase 2.3 の Worker は targets テーブルを使うため、**Worker を再デプロイする前に**適用すること:
+```bash
+npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0003_targets.sql
+```
 初期マスタ（1,485曲・ノーツ数つき）はシードSQLを使う。ファイルが大きいので分割して投入する:
 ```bash
 cd ../scripts

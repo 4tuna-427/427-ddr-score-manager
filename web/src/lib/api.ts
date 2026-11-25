@@ -329,3 +329,36 @@ export async function importScores(payload: unknown): Promise<ImportResult> {
 export function getChartHistory(chartId: string): Promise<ChartHistory> {
   return request(`/api/charts/${encodeURIComponent(chartId)}/history`)
 }
+
+export interface Target {
+  chart_id: string
+  target_score: number | null
+  target_lamp: string | null
+  updated_at: number
+  play_style: string
+  difficulty: string
+  level: number | null
+  song_title: string | null
+  artist: string | null
+  best_score: number | null
+}
+
+export function getTarget(chartId: string): Promise<{ target: Target | null }> {
+  return request(`/api/targets?chart_id=${encodeURIComponent(chartId)}`)
+}
+
+export function getTargets(): Promise<{ items: Target[] }> {
+  return request('/api/targets')
+}
+
+export function saveTarget(chartId: string, targetScore: number | null, targetLamp: string | null): Promise<{ target: Target }> {
+  return request('/api/targets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chart_id: chartId, target_score: targetScore, target_lamp: targetLamp }),
+  })
+}
+
+export function deleteTarget(chartId: string): Promise<{ deleted: boolean }> {
+  return request(`/api/targets/${encodeURIComponent(chartId)}`, { method: 'DELETE' })
+}
