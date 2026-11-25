@@ -33,6 +33,17 @@ Phase 2.3 の Worker は targets テーブルを使うため、**Worker を再�
 ```bash
 npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0003_targets.sql
 ```
+
+### ジャケット画像（KV 配信）のセットアップ
+ジャケット表示を使う場合のみ。**Worker を再デプロイする前に**マイグレーション 0004 を適用すること:
+```bash
+npx wrangler d1 execute ddr-score-db --remote --file ../migrations/0004_songs_jacket.sql
+```
+KV namespace を作成し、発行された ID を控える:
+```bash
+npx wrangler kv namespace create DDR_JACKETS
+```
+`worker/wrangler.toml` の末尾にある `[[kv_namespaces]]` ブロックのコメントを外し、`id` に上記 ID を入れてからデプロイする。画像の投入は ddr-song-data リポジトリ側のパイプラインが行う（同リポジトリの JACKETS.md 参照。GitHub Secrets の登録が必要）。KV が空の間は `has_jacket` が 0 のままなので、画面に変化はない。
 初期マスタ（1,485曲・ノーツ数つき）はシードSQLを使う。ファイルが大きいので分割して投入する:
 ```bash
 cd ../scripts

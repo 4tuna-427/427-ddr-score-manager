@@ -4,6 +4,7 @@ import { browseCharts, getBrowseFacets, type BrowseItem } from '../lib/api'
 import { exRatePercent } from '../lib/stats'
 import { fmtDate } from '../components/ScoreList'
 import { DiffBadge } from '../components/DiffBadge'
+import JacketThumb from '../components/JacketThumb'
 
 const DIFFS = ['BEGINNER', 'BASIC', 'DIFFICULT', 'EXPERT', 'CHALLENGE']
 const PAGE = 50
@@ -110,6 +111,7 @@ export function BrowsePage() {
           return (
             <li key={it.chart_id}>
               <Link to={`/charts/${encodeURIComponent(it.chart_id)}`} className="score-row">
+                <JacketThumb songId={it.song_id} hasJacket={it.has_jacket} />
                 <div className="score-row-main">
                   <span className="score-row-title">{it.title}</span>
                   <span className="muted">

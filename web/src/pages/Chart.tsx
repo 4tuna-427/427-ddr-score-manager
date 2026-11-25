@@ -5,6 +5,7 @@ import { deleteTarget, getChartHistory, getTarget, saveTarget, type ChartHistory
 import { useIsDark } from '../lib/theme'
 import { ScoreList, fmtDate } from '../components/ScoreList'
 import { DiffBadge } from '../components/DiffBadge'
+import JacketThumb from '../components/JacketThumb'
 
 const LAMP_ORDER: Record<string, number> = { FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6 }
 const TARGET_LAMPS = ['', 'CLEAR', 'LIFE4', 'FC', 'GFC', 'PFC', 'MFC']
@@ -84,11 +85,16 @@ export function ChartPage() {
 
   return (
     <div>
-      <h1>{title}</h1>
-      <p className="muted">
-        {chart.category && <span className={`badge cat-${chart.category.toLowerCase()}`}>{chart.category}</span>}{' '}
-        {chart.artist || ''} / <DiffBadge style={chart.play_style} difficulty={chart.difficulty} level={chart.level} />{chart.version ? ` ・ ${chart.version}` : ''}
-      </p>
+      <div className="chart-head">
+        <JacketThumb songId={chart.song_id} hasJacket={chart.has_jacket} size={64} />
+        <div>
+          <h1>{title}</h1>
+          <p className="muted">
+            {chart.category && <span className={`badge cat-${chart.category.toLowerCase()}`}>{chart.category}</span>}{' '}
+            {chart.artist || ''} / <DiffBadge style={chart.play_style} difficulty={chart.difficulty} level={chart.level} />{chart.version ? ` ・ ${chart.version}` : ''}
+          </p>
+        </div>
+      </div>
       <div className="card">
         <h2>目標</h2>
         {target && (

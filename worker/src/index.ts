@@ -28,6 +28,8 @@ import { extractFromImage } from "./gemini";
 
 export interface Env {
   DB: D1Database;
+  /** Jacket images (Workers KV). Optional: unset until the namespace is bound. */
+  JACKETS?: KVNamespace;
   API_TOKEN: string;
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
@@ -849,6 +851,26 @@ app.get("/api/songs", async (c) => {
   return c.json({ items });
 });
 
+// ---- GET /api/jackets/:song_id (authenticated image delivery from KV) ----
+// Jacket images are KONAMI artwork, so they are NOT public: the pipeline
+// stores them in Workers KV and this endpoint serves them only to
+// requests that passed the API-token auth middleware. 404 when the KV
+// binding is not configured yet or the song has no jacket in KV.
+app.get("/api/jackets/:song_id", async (c) => {
+  const kv = c.env.JACKETS;
+  if (!kv) return c.json({ error: "jacket storage is not configured" }, 404);
+  const songId = c.req.param("song_id");
+  const got = await kv.getWithMetadata<{ content_type?: string }>(songId, "arrayBuffer");
+  if (!got.value) return c.json({ error: "jacket not found" }, 404);
+  return new Response(got.value, {
+    headers: {
+      "Content-Type": got.metadata?.content_type ?? "image/jpeg",
+      // Authenticated response: browsers may cache it privately only.
+      "Cache-Control": "private, max-age=86400",
+    },
+  });
+});
+
 // ---- browse charts (master + personal bests) ----
 app.get("/api/browse/facets", async (c) => {
   const { results } = await c.env.DB
@@ -914,7 +936,7 @@ app.get("/api/browse", async (c) => {
   const { results: rows } = await c.env.DB
     .prepare(
       `SELECT c.chart_id, c.song_id, c.play_style, c.difficulty, c.level, c.max_ex,
-              s.title, s.artist, s.version, s.bpm,
+              s.title, s.artist, s.version, s.bpm, s.has_jacket,
               pb.best_score, pb.plays, pb.last_played
        ${fromSql} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
     )
@@ -953,7 +975,7 @@ app.get("/api/charts/:chart_id/history", async (c) => {
   const chartId = c.req.param("chart_id");
   const chartRow = await c.env.DB
     .prepare(
-      `SELECT charts.*, songs.title AS song_title, songs.artist AS artist, songs.version AS version
+      `SELECT charts.*, songs.title AS song_title, songs.artist AS artist, songs.version AS version, songs.has_jacket AS has_jacket
        FROM charts JOIN songs ON songs.song_id = charts.song_id WHERE charts.chart_id = ?`,
     )
     .bind(chartId)
@@ -982,7 +1004,7 @@ async function syncMaster(
   // Only write rows that actually changed (see planSync in lib.ts).
   const { results: existingSongs } = await db
     .prepare(
-      "SELECT song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at FROM songs",
+      "SELECT song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at, has_jacket FROM songs",
     )
     .all<SongRow>();
   const { results: existingCharts } = await db
@@ -991,14 +1013,15 @@ async function syncMaster(
   const { songUpserts, chartUpserts } = planSync(existingSongs, existingCharts, songs, charts);
 
   const songStmt = db.prepare(
-    `INSERT INTO songs (song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO songs (song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at, has_jacket, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(song_id) DO UPDATE SET
        title = excluded.title, title_normalized = excluded.title_normalized,
        artist = excluded.artist, version = excluded.version, bpm = excluded.bpm,
        phash_8 = COALESCE(excluded.phash_8, songs.phash_8),
        phash_16 = COALESCE(excluded.phash_16, songs.phash_16),
        availability = excluded.availability, deleted_at = excluded.deleted_at,
+       has_jacket = COALESCE(excluded.has_jacket, songs.has_jacket),
        updated_at = excluded.updated_at`,
   );
   // v1 masters carry no notecounts: keep existing notes/freeze/shock/max_ex via COALESCE.
@@ -1016,7 +1039,7 @@ async function syncMaster(
   const stmts: D1PreparedStatement[] = [];
   for (const s of songUpserts) {
     stmts.push(songStmt.bind(s.song_id, s.title, s.title_normalized, s.artist, s.version, s.bpm,
-      s.phash_8, s.phash_16, s.availability, s.deleted_at, now));
+      s.phash_8, s.phash_16, s.availability, s.deleted_at, s.has_jacket, now));
   }
   for (const ch of chartUpserts) {
     stmts.push(chartStmt.bind(ch.chart_id, ch.song_id, ch.play_style, ch.difficulty, ch.level,

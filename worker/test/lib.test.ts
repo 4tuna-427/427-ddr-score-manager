@@ -137,6 +137,13 @@ test("master format detection and v1 expansion", () => {
   assert.equal(spExpert.level, parseInt(masterV1[0].single_expert_level, 10));
 });
 
+test("expandMasterSong maps the jacket flag (boolean -> 1/0, absent -> null)", () => {
+  const base = { ...masterV2[0] };
+  assert.equal(expandMasterSong({ ...base, jacket: true }).song.has_jacket, 1);
+  assert.equal(expandMasterSong({ ...base, jacket: false }).song.has_jacket, 0);
+  assert.equal(expandMasterSong(base).song.has_jacket, null);
+});
+
 test("v2 expansion computes max_ex from notecounts", () => {
   const { charts: v2Charts } = expandMasterSong(masterV2[0]);
   const spBeginner = v2Charts.find((c) => c.play_style === "SP" && c.difficulty === "BEGINNER");
@@ -218,7 +225,7 @@ test("planSync writes only new or actually-changed rows", async () => {
   const song = (over: Partial<S> = {}): S => ({
     song_id: "s1", title: "Song", title_normalized: "song", artist: "Artist",
     version: "WORLD", bpm: "150", phash_8: "aa", phash_16: "bb",
-    availability: null, deleted_at: null, ...over,
+    availability: null, deleted_at: null, has_jacket: null, ...over,
   });
   const chart = (over: Partial<C> = {}): C => ({
     chart_id: "s1-SP-EXPERT", song_id: "s1", play_style: "SP", difficulty: "EXPERT",
@@ -257,6 +264,14 @@ test("planSync writes only new or actually-changed rows", async () => {
   // Tombstone appearing in the master -> song written.
   plan = planSync([song()], [chart()], [song({ deleted_at: "2026-01-01" })], [chart()]);
   assert.equal(plan.songUpserts.length, 1);
+
+  // Jacket flag arriving/changing in the master -> song written.
+  plan = planSync([song({ has_jacket: 0 })], [chart()], [song({ has_jacket: 1 })], [chart()]);
+  assert.equal(plan.songUpserts.length, 1);
+
+  // Master without the jacket field (null) never counts as a change.
+  plan = planSync([song({ has_jacket: 1 })], [chart()], [song()], [chart()]);
+  assert.equal(plan.songUpserts.length, 0);
 });
 
 test("computeStats: achievements, best lamp across plays, monthly PB updates", () => {

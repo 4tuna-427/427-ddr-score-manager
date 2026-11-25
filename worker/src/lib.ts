@@ -174,6 +174,8 @@ phash_8: string | null;
 phash_16: string | null;
 availability: string | null;
 deleted_at: string | null;
+/** 1 when a jacket image is available in KV; null when the master does not carry the flag. */
+has_jacket: number | null;
 }
 
 export interface ChartRow {
@@ -253,6 +255,7 @@ phash_8: toStr(raw.phash_8),
 phash_16: toStr(raw.phash_16),
 availability: toStr(raw.availability),
 deleted_at: toStr(raw.deleted_at),
+has_jacket: typeof raw.jacket === "boolean" ? (raw.jacket ? 1 : 0) : null,
 };
 const charts: ChartRow[] = [];
 if (format === "v2") {
@@ -336,7 +339,8 @@ export function planSync(
       e.availability !== m.availability ||
       e.deleted_at !== m.deleted_at ||
       (m.phash_8 != null && e.phash_8 !== m.phash_8) ||
-      (m.phash_16 != null && e.phash_16 !== m.phash_16)
+      (m.phash_16 != null && e.phash_16 !== m.phash_16) ||
+      (m.has_jacket != null && e.has_jacket !== m.has_jacket)
     );
   });
   const chartById = new Map(existingCharts.map((ch) => [ch.chart_id, ch]));

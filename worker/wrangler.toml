@@ -22,3 +22,7 @@ database_name = "ddr-score-db"
 # Replace with the real database_id after `wrangler d1 create ddr-score-db`.
 database_id = "c5a4a18e-bb5e-43b1-9ed7-f4c849df3b2b"
 migrations_dir = "../migrations"
+
+[[kv_namespaces]]
+binding = "JACKETS"
+id = "83c0753e3e9847408b9cb80dd0cb1613"

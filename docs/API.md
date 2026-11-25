@@ -81,7 +81,10 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - カテゴリ: 楽曲の収録バージョン（フォルダ＝初出バージョン。後から追加された譜面では分類しない）で判定する。CLASSIC = 1st〜X3 VS 2ndMIX / WHITE = (2013)〜A / GOLD = A20〜WORLD。判定は lib の `songCategory`（表記ゆれ吸収つき）。songs.version は「現行フォルダ ?? RemyWiki初出」の順で格納済みで、全1,485曲が分類できる（CLASSIC 479曲 / WHITE 306曲 / GOLD 700曲）。
 - 絞り込み: `q`（曲名の正規化部分一致 or アーティスト部分一致）、`style` SP/DP、`difficulty`、`level`（完全一致）、`version`（完全一致）、`category` = CLASSIC|WHITE|GOLD、`played` = played|unplayed
 - `sort`: level（既定）| title | best（ベストスコア降順、未プレイは最後）| recent（最終プレイ降順、未プレイは最後）
-- 各 item: 譜面・曲情報＋ `best_score` / `plays` / `last_played`、ベスト記録の `best_ex_score` / `best_rank` / `best_lamp`
+- 各 item: 譜面・曲情報＋ `best_score` / `plays` / `last_played`、ベスト記録の `best_ex_score` / `best_rank` / `best_lamp`、`has_jacket`（ジャケット画像が KV にある曲は 1）
+
+### GET /api/jackets/:song_id
+→ ジャケット画像（JPEG）を返す。画像は KONAMI の著作物のため公開せず、Workers KV に置いてこの認証つきエンドポイントでのみ配信する。マスタ配信（songs.json）の各曲 `jacket: true/false` が同期で `songs.has_jacket` になる。KV バインディング未設定、または該当曲の画像が無い場合は 404。レスポンスは `Cache-Control: private, max-age=86400`。
 
 ### GET /api/browse/facets
 → `{versions: [...]}`（songs に存在するバージョン一覧、絞り込みUI用）

@@ -101,6 +101,30 @@ export function analyzeImage(file: Blob, source: string, playedAtIso?: string): 
   return request<AnalyzeResult>('/api/analyze', { method: 'POST', body: fd })
 }
 
+const jacketUrlCache = new Map<string, Promise<string | null>>()
+
+/** Authenticated jacket image as an object URL (null when unavailable). Cached per song. */
+export function fetchJacketObjectUrl(songId: string): Promise<string | null> {
+  let p = jacketUrlCache.get(songId)
+  if (!p) {
+    p = (async () => {
+      try {
+        const base = getApiBaseUrl()
+        const headers = new Headers()
+        const token = getApiToken()
+        if (token) headers.set('X-API-Token', token)
+        const res = await fetch(`${base}/api/jackets/${encodeURIComponent(songId)}`, { headers })
+        if (!res.ok) return null
+        return URL.createObjectURL(await res.blob())
+      } catch {
+        return null
+      }
+    })()
+    jacketUrlCache.set(songId, p)
+  }
+  return p
+}
+
 export async function fetchExportBlob(): Promise<Blob> {
   const base = getApiBaseUrl()
   const headers = new Headers()
@@ -164,6 +188,7 @@ export interface ChartHistory {
     title?: string | null
     song_title?: string | null
     artist?: string | null
+    has_jacket?: number | null
   }
   items: Score[]
 }
@@ -192,6 +217,7 @@ export interface BrowseItem {
   artist: string | null
   version: string | null
   bpm: string | null
+  has_jacket?: number | null
   best_score: number | null
   plays: number | null
   last_played: number | null
