@@ -91,12 +91,20 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 ※ スコア行には `chart_max_ex`（譜面の最大EXスコア）が付く（scores 一覧・詳細・export・summary 共通）。EX達成率は `ex_score / chart_max_ex` でクライアントが算出する。
 
 ### GET /api/stats
-→ 統計・達成状況 `{totals, by_level, by_category, monthly}`。
+→ 統計・達成状況 `{totals, by_level, by_category, monthly, ex_rate_by_level, calendar}`。
 - 集計単位は譜面ごとのベスト達成：ランプとランクは「ベストスコアのプレイ」ではなく全プレイ中の最良を採用（低スコアでもFCしたプレイがあればFC扱い）。LIFE4 はクリア扱いで FC には数えない。
 - `totals`: 全譜面に対するバケット＋ `plays`（総プレイ数）/ `play_days`（JSTのプレイ日数）/ `aaa`（ベストランクAAAの譜面数）/ `max_clear_level`（クリア済み最大レベル、無ければ null）。
 - バケット共通フィールド: `total_charts`（マスタ譜面数）/ `played` / `clear` / `fc` / `gfc` / `pfc` / `mfc`（各しきい値以上の譜面数）。
 - `by_level`: `{play_style, level, ...バケット}`（SP→DP、レベル降順）。`by_category`: `{category, ...バケット}`（GOLD/WHITE/CLASSIC の順、カテゴリは曲のバージョンで判定）。
-- `monthly`: 直近12か月（JST）`{month: "YYYY-MM", plays, pb_updates}`。`pb_updates` は既プレイ譜面の自己ベスト更新回数（初プレイは含まない）。chart_id 未紐付けのプレイは totals.plays と monthly.plays にのみ数える。
+- `monthly`: 直近12か月（JST）`{month: "YYYY-MM", plays, pb_updates, avg_ex_rate}`。`pb_updates` は既プレイ譜面の自己ベスト更新回数（初プレイは含まない）。`avg_ex_rate` はその月の全プレイの平均EX率（%・小数1桁。ex_score と譜面の max_ex があるプレイのみ対象。該当プレイが無ければ null）。chart_id 未紐付けのプレイは totals.plays と monthly.plays にのみ数える。
+- `ex_rate_by_level`: `{play_style, level, avg_ex_rate, charts}`（SP→DP、レベル降順）。各譜面はベストEX率（ベスト ex_score / max_ex）を1回だけ寄与する。`charts` は寄与した譜面数。max_ex が無い譜面は対象外。
+- `calendar`: 直近365日（JST）の日別プレイ数 `[{date: "YYYY-MM-DD", plays}]`（プレイが無い日は省略）。
+
+### GET /api/versus
+→ 対戦履歴 `{opponents, recent}`。各スコア行の `raw_extraction`（バーサス時の相手側リザルト）を解析する。`MY_DANCER_NAME` と一致する側を自分、もう一方を相手とする。
+- `opponents`: 相手ダンサーネーム別 `{name, plays, wins, losses, draws, last_played_at}`（対戦数降順）。勝敗は両者のスコア比較。どちらかのスコアが無ければその対戦は plays に数えるが勝敗には数えない。
+- `recent`: 直近10件 `{score_id, opponent, song_title, my_score, opp_score, result, played_at}`（`result`: win/loss/draw/unknown）。
+- 対象外として安全にスキップする行: raw_extraction が無い/壊れている、バーサスでない、どちらも自名に一致しない、相手名が無い。`MY_DANCER_NAME` 未設定時は常に空を返す。
 
 ### GET /api/close-calls
 → あと少しリスト `{items}`。各譜面のベストスコアのプレイから、AAA（990,000点）まで 10,000 点以内のものと、次のランプまで判定 5 個以内のものを抽出する（`kind: "aaa" | "lamp"`、`gap` は AAA までの点数差または次ランプまでの判定数、`next_lamp` はランプ種のみ付く）。ランプの距離は lib の `lampGap`（CLEAR/LIFE4→FC は Miss 数、FC→GFC は Great+Good−1、GFC→PFC は Great+Good、PFC→MFC は Perfect 数。FAILED は対象外）。ランプ種を先に、各グループ内で gap 昇順。譜面は1件につき最大2エントリ（aaa/lamp）。各 item には曲名・アーティスト・譜面情報が付く。

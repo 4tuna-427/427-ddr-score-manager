@@ -13,6 +13,7 @@ import {
   computeDayUpdates,
   computeStats,
   computeCloseCalls,
+  computeVersus,
   songCategory,
   CATEGORY_VERSION_SPELLINGS,
   type SongCategory,
@@ -338,20 +339,33 @@ app.get("/api/stats", async (c) => {
   const { results: masterRows } = await c.env.DB
     .prepare(
       `SELECT ch.chart_id AS chart_id, ch.play_style AS play_style, ch.level AS level,
-              s.version AS version
+              ch.max_ex AS max_ex, s.version AS version
        FROM charts ch JOIN songs s ON s.song_id = ch.song_id`,
     )
-    .all<{ chart_id: string; play_style: string; level: number | null; version: string | null }>();
+    .all<{ chart_id: string; play_style: string; level: number | null; max_ex: number | null; version: string | null }>();
   const { results: playRows } = await c.env.DB
-    .prepare("SELECT chart_id, score, rank, clear_lamp, played_at FROM scores")
-    .all<{ chart_id: string | null; score: number; rank: string | null; clear_lamp: string | null; played_at: number }>();
+    .prepare("SELECT chart_id, score, ex_score, rank, clear_lamp, played_at FROM scores")
+    .all<{ chart_id: string | null; score: number; ex_score: number | null; rank: string | null; clear_lamp: string | null; played_at: number }>();
   const master = masterRows.map((r) => ({
     chart_id: r.chart_id,
     play_style: r.play_style,
     level: r.level,
+    max_ex: r.max_ex,
     category: songCategory(r.version),
   }));
   return c.json(computeStats(master, playRows, Date.now()));
+});
+
+// ---- GET /api/versus: versus history from raw_extraction ----
+app.get("/api/versus", async (c) => {
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT s.id AS id, COALESCE(songs.title, s.raw_title) AS song_title, s.raw_extraction AS raw_extraction, s.played_at AS played_at
+       FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
+       WHERE s.raw_extraction IS NOT NULL ORDER BY s.played_at DESC`,
+    )
+    .all<{ id: string; song_title: string | null; raw_extraction: string | null; played_at: number }>();
+  return c.json(computeVersus(results, c.env.MY_DANCER_NAME));
 });
 
 // ---- GET /api/close-calls: charts whose best play is almost AAA / almost the next lamp ----

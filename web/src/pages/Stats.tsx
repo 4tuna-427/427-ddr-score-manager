@@ -1,9 +1,52 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { getCloseCalls, getStats, type AchievementBucket, type CloseCall, type StatsResponse } from '../lib/api'
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { getCloseCalls, getStats, getVersus, type AchievementBucket, type CloseCall, type StatsResponse, type VersusResponse } from '../lib/api'
 import { useIsDark } from '../lib/theme'
 import { DiffBadge } from '../components/DiffBadge'
+import { fmtDate } from '../components/ScoreList'
+
+/** JST calendar date "YYYY-MM-DD" for an epoch-ms timestamp. */
+function jstDateString(ms: number): string {
+  return new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+/** Day-of-week (0=Sunday) of a JST date string. */
+function jstDayOfWeek(date: string): number {
+  return new Date(Date.parse(`${date}T00:00:00+09:00`) + 9 * 3600 * 1000).getUTCDay()
+}
+
+function CalendarHeatmap({ calendar }: { calendar: { date: string; plays: number }[] }) {
+  const byDate = new Map(calendar.map((d) => [d.date, d.plays]))
+  const endMs = Date.parse(`${jstDateString(Date.now())}T00:00:00+09:00`)
+  const days: { date: string; plays: number }[] = []
+  for (let i = 364; i >= 0; i--) {
+    const date = jstDateString(endMs - i * 86400000)
+    days.push({ date, plays: byDate.get(date) ?? 0 })
+  }
+  // Pad so the first column starts on Sunday (JST).
+  const pad = jstDayOfWeek(days[0].date)
+  const cells: ({ date: string; plays: number } | null)[] = [...Array(pad).fill(null), ...days]
+  const level = (plays: number) => (plays === 0 ? 0 : plays <= 2 ? 1 : plays <= 5 ? 2 : 3)
+  return (
+    <div>
+      <div className="cal-grid">
+        {cells.map((c, i) =>
+          c === null ? (
+            <span key={`pad-${i}`} className="cal-cell cal-pad" />
+          ) : (
+            <span
+              key={c.date}
+              className={`cal-cell cal-${level(c.plays)}`}
+              title={`${c.date}：${c.plays}プレイ`}
+            />
+          ),
+        )}
+      </div>
+      <p className="muted">直近1年（JST）。色が濃いほどプレイ数が多い日です。</p>
+    </div>
+  )
+}
 
 function LampCounts({ b }: { b: AchievementBucket }) {
   return (
@@ -33,12 +76,14 @@ export function StatsPage() {
   const [error, setError] = useState('')
   const [style, setStyle] = useState<'SP' | 'DP'>('SP')
   const [closeCalls, setCloseCalls] = useState<CloseCall[] | null>(null)
+  const [versus, setVersus] = useState<VersusResponse | null>(null)
 
   useEffect(() => {
     getStats()
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
     getCloseCalls().then((r) => setCloseCalls(r.items)).catch(() => setCloseCalls([]))
+    getVersus().then(setVersus).catch(() => setVersus({ opponents: [], recent: [] }))
   }, [])
 
   if (error) return <p className="error">{error}</p>
@@ -47,6 +92,7 @@ export function StatsPage() {
   const t = data.totals
   const levels = data.by_level.filter((r) => r.play_style === style)
   const monthly = data.monthly.map((m) => ({ ...m, label: m.month.slice(2) }))
+  const exByLevel = new Map(data.ex_rate_by_level.map((r) => [`${r.play_style}|${r.level}`, r]))
 
   return (
     <div>
@@ -97,7 +143,7 @@ export function StatsPage() {
         </div>
         <table className="level-table">
           <thead>
-            <tr><th>Lv</th><th>プレイ済み</th><th>クリア</th><th>FC</th><th>PFC</th><th>MFC</th></tr>
+            <tr><th>Lv</th><th>プレイ済み</th><th>クリア</th><th>FC</th><th>PFC</th><th>MFC</th><th>EX率</th></tr>
           </thead>
           <tbody>
             {levels.map((r) => (
@@ -108,10 +154,12 @@ export function StatsPage() {
                 <td>{r.fc}</td>
                 <td>{r.pfc}</td>
                 <td>{r.mfc}</td>
+                <td>{exByLevel.get(`${r.play_style}|${r.level}`)?.avg_ex_rate != null ? `${exByLevel.get(`${r.play_style}|${r.level}`)!.avg_ex_rate}%` : '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        <p className="muted">EX率は譜面ごとのベストEX率の平均（ノーツ数がある譜面のみ）。</p>
       </section>
 
       <section className="card">
@@ -137,6 +185,70 @@ export function StatsPage() {
             <Bar dataKey="pb_updates" name="自己ベスト更新" fill={dark ? '#c9f7dd' : '#0b7a43'} />
           </BarChart>
         </ResponsiveContainer>
+        <h3>月別平均EX率</h3>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={monthly} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#2b3a30' : '#d7e2da'} />
+            <XAxis dataKey="label" />
+            <YAxis domain={['auto', 100]} tickFormatter={(v: number) => `${v}%`} width={48} />
+            <Tooltip
+              contentStyle={dark ? { background: '#171f1a', border: '1px solid #2b3a30', color: '#e8f1ea' } : undefined}
+              formatter={(v) => (v == null ? '—' : `${v}%`)}
+            />
+            <Line type="monotone" dataKey="avg_ex_rate" name="平均EX率" stroke={dark ? '#6ddc99' : '#0b7a43'} strokeWidth={2} dot connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+        <p className="muted">ノーツ数がある譜面のプレイのみ対象。月内に該当プレイが無い月は線が途切れます。</p>
+      </section>
+
+      <section className="card">
+        <h3>プレイカレンダー</h3>
+        <CalendarHeatmap calendar={data.calendar} />
+      </section>
+
+      <section className="card">
+        <h3>対戦履歴</h3>
+        {versus === null ? (
+          <p className="muted">読み込み中…</p>
+        ) : versus.opponents.length === 0 ? (
+          <p className="muted">対戦記録がありません。</p>
+        ) : (
+          <>
+            <table className="level-table">
+              <thead>
+                <tr><th>相手</th><th>対戦数</th><th>勝</th><th>敗</th><th>分</th><th>直近</th></tr>
+              </thead>
+              <tbody>
+                {versus.opponents.map((o) => (
+                  <tr key={o.name}>
+                    <td>{o.name}</td>
+                    <td>{o.plays}</td>
+                    <td>{o.wins}</td>
+                    <td>{o.losses}</td>
+                    <td>{o.draws}</td>
+                    <td>{fmtDate(o.last_played_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <ul className="update-list">
+              {versus.recent.map((r) => (
+                <li key={r.score_id}>
+                  <Link to={`/scores/${r.score_id}`}>
+                    <span className="update-title">{r.song_title || '(曲名不明)'}</span>
+                    <span className="muted"> vs {r.opponent}</span>
+                    <span className="update-score">
+                      {r.my_score != null ? r.my_score.toLocaleString() : '—'} - {r.opp_score != null ? r.opp_score.toLocaleString() : '—'}
+                      <span className={r.result === 'win' ? 'diff up' : r.result === 'loss' ? 'diff down' : 'muted'}>
+                        {r.result === 'win' ? '勝ち' : r.result === 'loss' ? '負け' : r.result === 'draw' ? '引き分け' : '不明'}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </section>
     </div>
   )

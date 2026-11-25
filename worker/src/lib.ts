@@ -573,6 +573,7 @@ export interface StatPlay {
   rank: string | null;
   clear_lamp: string | null;
   played_at: number;
+  ex_score?: number | null;
 }
 
 export interface StatMasterChart {
@@ -580,6 +581,7 @@ export interface StatMasterChart {
   play_style: string;
   level: number | null;
   category: SongCategory | null;
+  max_ex?: number | null;
 }
 
 export interface AchievementBucket {
@@ -601,7 +603,11 @@ export interface StatsResult {
   };
   by_level: ({ play_style: string; level: number } & AchievementBucket)[];
   by_category: ({ category: SongCategory } & AchievementBucket)[];
-  monthly: { month: string; plays: number; pb_updates: number }[];
+  monthly: { month: string; plays: number; pb_updates: number; avg_ex_rate: number | null }[];
+  /** Per-level average EX rate: each chart contributes its best EX rate (best ex_score / max_ex). */
+  ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[];
+  /** Days with plays in the last 365 JST days (sparse; days without plays are omitted). */
+  calendar: { date: string; plays: number }[];
 }
 
 const emptyBucket = (): AchievementBucket => ({
@@ -615,6 +621,9 @@ const emptyBucket = (): AchievementBucket => ({
  * count strict score improvements on already-played charts, by JST month,
  * for the 12 months ending with nowMs's month. Plays without a chart_id
  * count toward totals.plays and monthly plays only.
+ * EX rates use only plays/charts whose chart has a max_ex (notecounts):
+ * monthly avg EX rate averages every qualifying play in the month, while
+ * the per-level rate averages each chart's best EX rate once.
  */
 export function computeStats(
   masterCharts: StatMasterChart[],
@@ -624,8 +633,10 @@ export function computeStats(
   const sorted = [...plays].sort((a, b) => a.played_at - b.played_at);
 
   // Monthly buckets for the last 12 JST months (oldest first).
-  const months: { month: string; plays: number; pb_updates: number }[] = [];
+  const months: StatsResult["monthly"] = [];
   const monthIdx = new Map<string, number>();
+  const monthExSum: number[] = [];
+  const monthExCount: number[] = [];
   {
     const now = new Date(nowMs + 9 * 3600 * 1000); // JST wall clock
     let y = now.getUTCFullYear();
@@ -638,18 +649,29 @@ export function computeStats(
     }
     for (const k of keys) {
       monthIdx.set(k, months.length);
-      months.push({ month: k, plays: 0, pb_updates: 0 });
+      months.push({ month: k, plays: 0, pb_updates: 0, avg_ex_rate: null });
+      monthExSum.push(0);
+      monthExCount.push(0);
     }
+  }
+
+  const chartMaxEx = new Map<string, number>();
+  for (const ch of masterCharts) {
+    if (ch.max_ex != null) chartMaxEx.set(ch.chart_id, ch.max_ex);
   }
 
   const bestScore = new Map<string, number>();
   const bestLamp = new Map<string, number>();
   const bestRank = new Map<string, number>();
+  const bestEx = new Map<string, number>();
   const playDays = new Set<string>();
+  const playsByDay = new Map<string, number>();
 
   for (const p of sorted) {
-    playDays.add(jstDateString(p.played_at));
-    const mi = monthIdx.get(jstDateString(p.played_at).slice(0, 7));
+    const day = jstDateString(p.played_at);
+    playDays.add(day);
+    playsByDay.set(day, (playsByDay.get(day) ?? 0) + 1);
+    const mi = monthIdx.get(day.slice(0, 7));
     if (mi !== undefined) months[mi].plays += 1;
     if (!p.chart_id) continue;
     const prevBest = bestScore.get(p.chart_id);
@@ -661,6 +683,19 @@ export function computeStats(
     if (lamp > (bestLamp.get(p.chart_id) ?? -1)) bestLamp.set(p.chart_id, lamp);
     const rank = p.rank != null ? RANK_ORDER.indexOf(p.rank) : -1;
     if (rank > (bestRank.get(p.chart_id) ?? -1)) bestRank.set(p.chart_id, rank);
+    if (p.ex_score != null) {
+      if (p.ex_score > (bestEx.get(p.chart_id) ?? -1)) bestEx.set(p.chart_id, p.ex_score);
+      const mx = chartMaxEx.get(p.chart_id);
+      if (mx && mi !== undefined) {
+        monthExSum[mi] += p.ex_score / mx;
+        monthExCount[mi] += 1;
+      }
+    }
+  }
+  for (let i = 0; i < months.length; i++) {
+    months[i].avg_ex_rate = monthExCount[i] > 0
+      ? Math.round((monthExSum[i] / monthExCount[i]) * 1000) / 10
+      : null;
   }
 
   const applyTo = (b: AchievementBucket, chartId: string) => {
@@ -704,5 +739,145 @@ export function computeStats(
     a.play_style === b.play_style ? b.level - a.level : a.play_style === "SP" ? -1 : 1);
   const by_category = (["GOLD", "WHITE", "CLASSIC"] as SongCategory[])
     .map((category) => ({ category, ...catMap.get(category)! }));
-  return { totals, by_level, by_category, monthly: months };
+
+  // Per-level average EX rate (each chart contributes its best EX rate once).
+  const exByLevel = new Map<string, { sum: number; n: number }>();
+  for (const ch of masterCharts) {
+    if (ch.level == null) continue;
+    const ex = bestEx.get(ch.chart_id);
+    const mx = chartMaxEx.get(ch.chart_id);
+    if (ex == null || !mx) continue;
+    const key = `${ch.play_style}|${ch.level}`;
+    const cur = exByLevel.get(key) ?? { sum: 0, n: 0 };
+    cur.sum += ex / mx;
+    cur.n += 1;
+    exByLevel.set(key, cur);
+  }
+  const ex_rate_by_level = [...exByLevel.entries()]
+    .map(([key, v]) => {
+      const [play_style, level] = key.split("|");
+      return {
+        play_style,
+        level: parseInt(level, 10),
+        avg_ex_rate: Math.round((v.sum / v.n) * 1000) / 10,
+        charts: v.n,
+      };
+    })
+    .sort((a, b) =>
+      a.play_style === b.play_style ? b.level - a.level : a.play_style === "SP" ? -1 : 1);
+
+  // Play calendar: last 365 JST days ending today (sparse).
+  const endDay = jstDateString(nowMs);
+  const startMs = jstDayStartMs(endDay) - 364 * 86400000;
+  const calendar = [...playsByDay.entries()]
+    .filter(([date]) => {
+      const ms = jstDayStartMs(date);
+      return ms >= startMs && ms <= jstDayStartMs(endDay);
+    })
+    .map(([date, plays]) => ({ date, plays }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  return { totals, by_level, by_category, monthly: months, ex_rate_by_level, calendar };
+}
+
+// ---- versus history ----
+
+export interface VersusRow {
+  id: string;
+  song_title: string | null;
+  raw_extraction: string | null;
+  played_at: number;
+}
+
+export type VersusResult = "win" | "loss" | "draw" | "unknown";
+
+export interface VersusOpponent {
+  name: string;
+  plays: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  last_played_at: number;
+}
+
+export interface VersusRecent {
+  score_id: string;
+  opponent: string;
+  song_title: string | null;
+  my_score: number | null;
+  opp_score: number | null;
+  result: VersusResult;
+  played_at: number;
+}
+
+export interface VersusSummary {
+  opponents: VersusOpponent[];
+  recent: VersusRecent[];
+}
+
+/**
+ * Versus history from the opponent's result stored inside each score row's
+ * raw_extraction (the opponent only exists there). Rows are skipped when
+ * the extraction is missing/corrupt, the play was not versus, neither
+ * player matches myName (so the winner cannot be determined), or the
+ * opponent has no dancer name. A missing score on either side counts as
+ * a play with result "unknown" (not a win or a loss).
+ */
+export function computeVersus(rows: VersusRow[], myName: string | null | undefined): VersusSummary {
+  const mine = (myName ?? "").trim().toLowerCase();
+  const oppMap = new Map<string, VersusOpponent>();
+  const recent: VersusRecent[] = [];
+  for (const row of rows) {
+    if (!row.raw_extraction) continue;
+    let ext: Extraction;
+    try {
+      ext = JSON.parse(row.raw_extraction) as Extraction;
+    } catch {
+      continue; // corrupt extraction: skip safely
+    }
+    if (!ext.is_versus || !ext.player_1 || !ext.player_2) continue;
+    const p1Name = (ext.player_1.dancer_name ?? "").trim().toLowerCase();
+    const p2Name = (ext.player_2.dancer_name ?? "").trim().toLowerCase();
+    let me: PlayerExtraction | null = null;
+    let opp: PlayerExtraction | null = null;
+    if (mine && p1Name === mine) {
+      me = ext.player_1;
+      opp = ext.player_2;
+    } else if (mine && p2Name === mine) {
+      me = ext.player_2;
+      opp = ext.player_1;
+    } else {
+      continue; // cannot tell which side is mine
+    }
+    const oppName = (opp.dancer_name ?? "").trim();
+    if (!oppName) continue;
+    const myScore = me.score;
+    const oppScore = opp.score;
+    const result: VersusResult =
+      myScore == null || oppScore == null ? "unknown"
+      : myScore > oppScore ? "win"
+      : myScore < oppScore ? "loss" : "draw";
+    const cur = oppMap.get(oppName) ?? {
+      name: oppName, plays: 0, wins: 0, losses: 0, draws: 0, last_played_at: 0,
+    };
+    cur.plays += 1;
+    if (result === "win") cur.wins += 1;
+    else if (result === "loss") cur.losses += 1;
+    else if (result === "draw") cur.draws += 1;
+    if (row.played_at > cur.last_played_at) cur.last_played_at = row.played_at;
+    oppMap.set(oppName, cur);
+    recent.push({
+      score_id: row.id,
+      opponent: oppName,
+      song_title: row.song_title,
+      my_score: myScore,
+      opp_score: oppScore,
+      result,
+      played_at: row.played_at,
+    });
+  }
+  const opponents = [...oppMap.values()].sort((a, b) =>
+    b.plays - a.plays || b.last_played_at - a.last_played_at);
+  recent.sort((a, b) => b.played_at - a.played_at);
+  return { opponents, recent: recent.slice(0, 10) };
 }

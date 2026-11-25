@@ -246,11 +246,41 @@ export interface StatsResponse {
   }
   by_level: (AchievementBucket & { play_style: string; level: number })[]
   by_category: (AchievementBucket & { category: string })[]
-  monthly: { month: string; plays: number; pb_updates: number }[]
+  monthly: { month: string; plays: number; pb_updates: number; avg_ex_rate: number | null }[]
+  ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[]
+  calendar: { date: string; plays: number }[]
 }
 
 export function getStats(): Promise<StatsResponse> {
   return request('/api/stats')
+}
+
+export interface VersusOpponent {
+  name: string
+  plays: number
+  wins: number
+  losses: number
+  draws: number
+  last_played_at: number
+}
+
+export interface VersusRecent {
+  score_id: string
+  opponent: string
+  song_title: string | null
+  my_score: number | null
+  opp_score: number | null
+  result: 'win' | 'loss' | 'draw' | 'unknown'
+  played_at: number
+}
+
+export interface VersusResponse {
+  opponents: VersusOpponent[]
+  recent: VersusRecent[]
+}
+
+export function getVersus(): Promise<VersusResponse> {
+  return request('/api/versus')
 }
 
 export interface CloseCall {

@@ -396,3 +396,94 @@ test("resolveModelList orders models and honors GEMINI_MODELS override", async (
   );
   assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODELS: "  " }), ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]);
 });
+
+test("computeStats: monthly and per-level EX rates use only charts with max_ex", async () => {
+  const { computeStats } = await import("../src/lib");
+  const jst = (y: number, mo: number, d: number, h = 12) => Date.UTC(y, mo - 1, d, h) - 9 * 3600 * 1000;
+  const master = [
+    { chart_id: "c1", play_style: "SP", level: 15, category: "GOLD" as const, max_ex: 3000 },
+    { chart_id: "c2", play_style: "SP", level: 15, category: "GOLD" as const, max_ex: 2000 },
+    { chart_id: "c3", play_style: "SP", level: 18, category: "CLASSIC" as const, max_ex: null }, // no notecounts: excluded
+  ];
+  const plays = [
+    { chart_id: "c1", score: 900000, ex_score: 2700, rank: "AA", clear_lamp: "FC", played_at: jst(2026, 11, 2) }, // 90%
+    { chart_id: "c1", score: 950000, ex_score: 2850, rank: "AAA", clear_lamp: "PFC", played_at: jst(2026, 11, 3) }, // 95%
+    { chart_id: "c2", score: 800000, ex_score: 1600, rank: "A", clear_lamp: "CLEAR", played_at: jst(2026, 11, 3) }, // 80%
+    { chart_id: "c3", score: 700000, ex_score: 1500, rank: "B", clear_lamp: "CLEAR", played_at: jst(2026, 11, 3) }, // no max_ex: excluded
+    { chart_id: "c1", score: 990000, ex_score: 2970, rank: "AAA", clear_lamp: "PFC", played_at: jst(2026, 10, 5) }, // 99%, October
+    { chart_id: null, score: 500000, ex_score: 1000, rank: null, clear_lamp: null, played_at: jst(2026, 11, 4) }, // unlinked: excluded
+  ];
+  const s = computeStats(master, plays, jst(2026, 11, 25));
+  const nov = s.monthly.find((m) => m.month === "2026-11")!;
+  // Monthly: every qualifying play counts -> (90+95+80)/3 = 88.3
+  assert.equal(nov.avg_ex_rate, 88.3);
+  const oct = s.monthly.find((m) => m.month === "2026-10")!;
+  assert.equal(oct.avg_ex_rate, 99);
+  const sep = s.monthly.find((m) => m.month === "2026-09")!;
+  assert.equal(sep.avg_ex_rate, null);
+  // Per level: each chart contributes its BEST ex rate once: c1 99%, c2 80% -> (99+80)/2 = 89.5
+  const sp15 = s.ex_rate_by_level.find((r) => r.play_style === "SP" && r.level === 15)!;
+  assert.equal(sp15.avg_ex_rate, 89.5);
+  assert.equal(sp15.charts, 2);
+  assert.equal(s.ex_rate_by_level.find((r) => r.level === 18), undefined);
+  // Calendar: 2026-11-02: 1, 11-03: 3 (c1, c2, c3), 11-04: 1, 10-05: 1
+  assert.deepEqual(s.calendar, [
+    { date: "2026-10-05", plays: 1 },
+    { date: "2026-11-02", plays: 1 },
+    { date: "2026-11-03", plays: 3 },
+    { date: "2026-11-04", plays: 1 },
+  ]);
+  // Calendar window is the last 365 days: an older play is dropped.
+  const old = computeStats(master, [
+    { chart_id: "c1", score: 1, ex_score: null, rank: null, clear_lamp: null, played_at: jst(2025, 11, 24) },
+  ], jst(2026, 11, 25));
+  assert.deepEqual(old.calendar, []);
+});
+
+test("computeVersus aggregates opponents from raw_extraction (Phase 0 versus ground truth)", async () => {
+  const { computeVersus } = await import("../src/lib");
+  const gtDir = join(here, "fixtures", "ground_truth");
+  const versus = readdirSync(gtDir)
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .map((f) => JSON.parse(readFileSync(join(gtDir, f), "utf-8")) as Extraction)
+    .filter((g) => g.is_versus);
+  assert.equal(versus.length, 2);
+  const T0 = Date.parse("2026-08-25T07:17:00+09:00");
+  const rows = versus.map((g, i) => ({
+    id: `v${i}`,
+    song_title: g.song_title,
+    raw_extraction: JSON.stringify(g),
+    played_at: T0 + i * 600000,
+  }));
+  // Plus edge cases: solo (not versus), corrupt JSON, unknown names, null scores.
+  rows.push(
+    { id: "solo", song_title: "Solo", raw_extraction: JSON.stringify({ is_versus: false, player_1: { dancer_name: "4TUNA", score: 1 }, player_2: null }), played_at: T0 + 1000000 },
+    { id: "corrupt", song_title: "Bad", raw_extraction: "{not json", played_at: T0 + 2000000 },
+    { id: "unknown", song_title: "Strangers", raw_extraction: JSON.stringify({ is_versus: true, player_1: { dancer_name: "AAA", score: 5 }, player_2: { dancer_name: "BBB", score: 4 } }), played_at: T0 + 3000000 },
+    { id: "noscore", song_title: "NoScore", raw_extraction: JSON.stringify({ is_versus: true, player_1: { dancer_name: "4TUNA", score: null }, player_2: { dancer_name: "CORGI", score: 900000 } }), played_at: T0 + 4000000 },
+  );
+  const v = computeVersus(rows, "4TUNA");
+  // Pierce The Sky: 4TUNA 994610 vs CORGI 994680 -> loss; HORIZON BEATZ: 995260 vs 995250 -> win
+  assert.equal(v.opponents.length, 1);
+  assert.deepEqual(v.opponents[0], {
+    name: "CORGI", plays: 3, wins: 1, losses: 1, draws: 0, last_played_at: T0 + 4000000,
+  });
+  assert.equal(v.recent.length, 3);
+  assert.equal(v.recent[0].result, "unknown"); // null score
+  assert.equal(v.recent[1].song_title, "HORIZON BEATZ");
+  assert.equal(v.recent[1].result, "win");
+  assert.equal(v.recent[1].my_score, 995260);
+  assert.equal(v.recent[1].opp_score, 995250);
+  assert.equal(v.recent[2].song_title, "Pierce The Sky");
+  assert.equal(v.recent[2].result, "loss");
+  // Player_2 as self: swapped names still resolve.
+  const swapped = computeVersus(rows.slice(0, 2).map((r) => {
+    const g = JSON.parse(r.raw_extraction!) as Extraction;
+    return { ...r, raw_extraction: JSON.stringify({ ...g, player_1: g.player_2, player_2: g.player_1 }) };
+  }), "4TUNA");
+  assert.equal(swapped.opponents[0].wins, 1);
+  assert.equal(swapped.opponents[0].losses, 1);
+  // No MY_DANCER_NAME configured: nothing can be attributed.
+  assert.deepEqual(computeVersus(rows, null), { opponents: [], recent: [] });
+});
