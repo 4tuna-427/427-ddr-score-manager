@@ -242,6 +242,7 @@ export interface BrowseItem {
   best_ex_score?: number | null
   best_rank?: string | null
   best_lamp?: string | null
+  best_flare_rank?: string | null
   category?: string | null
 }
 
@@ -293,7 +294,18 @@ export interface StatsResponse {
   monthly: { month: string; plays: number; pb_updates: number; avg_ex_rate: number | null }[]
   ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[]
   calendar: { date: string; plays: number }[]
-  flare: { by_rank: { flare_rank: string; charts: number }[]; charts_with_flare: number }
+  flare: {
+    by_rank: { flare_rank: string; charts: number }[]
+    charts_with_flare: number
+    targets: {
+      level: number
+      min_rank: string
+      achieved: { chart_id: string; title: string | null; play_style: string; flare_rank: string }[]
+      achieved_count: number
+      candidates: { chart_id: string; title: string | null; play_style: string; best_flare_rank: string | null }[]
+      candidate_count: number
+    }[]
+  }
 }
 
 export function getStats(): Promise<StatsResponse> {

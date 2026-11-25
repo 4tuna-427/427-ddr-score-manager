@@ -224,3 +224,8 @@ button.danger { color: #c2272f; border-color: #c2272f; }
 .error-log-list li { padding: 8px 0; border-top: 1px solid var(--line); }
 .error-log-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .error-log-msg { display: block; font-size: 12px; word-break: break-all; white-space: pre-wrap; }
+
+/* Phase 2.6 (revised): flare clear targets on the Stats page */
+.flare-target { padding: 10px 0; border-top: 1px solid var(--line); }
+.flare-target:first-of-type { border-top: 0; }
+.flare-target-count { margin: 0 8px; }

@@ -95,7 +95,10 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 
 ### GET /api/stats
 → 統計・達成状況 `{totals, by_level, by_category, monthly, ex_rate_by_level, calendar, flare}`。
-- `flare`: 譜面ごとの最高フレアランク（I=1..IX=9, EX=10）の分布 `{by_rank: [{flare_rank, charts}]（強い順）, charts_with_flare}`。フレアランクが無いプレイは対象外。
+- `flare`: `{by_rank, charts_with_flare, targets}`。フレアスキルの合計値や称号ランクは扱わない（ユーザーの方針: アプリの目的は履歴の保存と成長の可視化）。
+  - `by_rank`: 譜面ごとの「クリアした最高フレアランク」（I=1..IX=9, EX=10）の分布（強い順）。クリアランプがあるプレイのみ対象（FAILED のバッジ読み取りは数えない）。フレア無しクリアは含まない。
+  - `targets`: 現在のフレア目標コンボ（`FLARE_TARGETS` = 16EX / 17EX / 17IX / 18IX）ごとの `{level, min_rank, achieved[], achieved_count, candidates[], candidate_count}`。達成 = そのレベルの譜面を目標以上のフレアランクでクリア済み（EXクリアはIX目標も満たす）。候補 = そのレベルをクリア済みだが目標ランク未満（現在の最高フレアランク付き、近い順）。一覧は achieved 最大50件・candidates 最大20件に切り詰め、件数は実数。
+  - 楽曲ブラウズ（GET /api/browse）の各行には `best_flare_rank`（その譜面の全プレイ中の最高フレアランク）が付く。
 - 集計単位は譜面ごとのベスト達成：ランプとランクは「ベストスコアのプレイ」ではなく全プレイ中の最良を採用（低スコアでもFCしたプレイがあればFC扱い）。LIFE4 はクリア扱いで FC には数えない。
 - `totals`: 全譜面に対するバケット＋ `plays`（総プレイ数）/ `play_days`（JSTのプレイ日数）/ `aaa`（ベストランクAAAの譜面数）/ `max_clear_level`（クリア済み最大レベル、無ければ null）。
 - バケット共通フィールド: `total_charts`（マスタ譜面数）/ `played` / `clear` / `fc` / `gfc` / `pfc` / `mfc`（各しきい値以上の譜面数）。

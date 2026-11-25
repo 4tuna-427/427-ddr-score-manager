@@ -207,11 +207,53 @@ export function StatsPage() {
       </section>
 
       <section className="card">
-        <h3>フレアランク別 達成譜面数</h3>
-        {data.flare.charts_with_flare === 0 ? (
-          <p className="muted">フレアランクの記録がまだありません。</p>
-        ) : (
+        <h3>フレア目標</h3>
+        {data.flare.targets.map((t) => (
+          <div key={`${t.level}-${t.min_rank}`} className="flare-target">
+            <h4>
+              Lv{t.level} フレア{t.min_rank}クリア：
+              <span className="flare-target-count">達成 {t.achieved_count}譜面</span>
+              <span className="muted">（あと少し {t.candidate_count}譜面）</span>
+            </h4>
+            {t.achieved.length > 0 && (
+              <ul className="update-list cap-list">
+                {t.achieved.map((a) => (
+                  <li key={a.chart_id}>
+                    <Link to={`/charts/${encodeURIComponent(a.chart_id)}`}>
+                      <span className="update-title">{a.title || '(曲名不明)'}</span>
+                      <DiffBadge style={a.play_style} difficulty={a.chart_id.split('|')[2] || ''} level={t.level} />
+                      <span className="update-score">フレア {a.flare_rank}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {t.candidates.length > 0 && (
+              <>
+                <p className="muted">あと少し（クリア済み・目標ランク未満、近い順）：</p>
+                <ul className="update-list cap-list">
+                  {t.candidates.map((cand) => (
+                    <li key={cand.chart_id}>
+                      <Link to={`/charts/${encodeURIComponent(cand.chart_id)}`}>
+                        <span className="update-title">{cand.title || '(曲名不明)'}</span>
+                        <DiffBadge style={cand.play_style} difficulty={cand.chart_id.split('|')[2] || ''} level={t.level} />
+                        <span className="update-score">
+                          現在 {cand.best_flare_rank ? `フレア ${cand.best_flare_rank}` : '通常ゲージ'}クリア
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {t.achieved_count === 0 && t.candidate_count === 0 && (
+              <p className="muted">このレベルのクリア記録がまだありません。</p>
+            )}
+          </div>
+        ))}
+        {data.flare.charts_with_flare > 0 && (
           <>
+            <h4>フレアランク別 達成譜面数（クリアした最高ランク）</h4>
             <table className="level-table">
               <thead>
                 <tr><th>フレアランク</th><th>譜面数</th></tr>
@@ -225,9 +267,11 @@ export function StatsPage() {
                 ))}
               </tbody>
             </table>
-            <p className="muted">譜面ごとの最高フレアランクで集計（全{data.flare.charts_with_flare}譜面）。リザルト画面のバッジから読み取った記録です。</p>
           </>
         )}
+        <p className="muted">
+          目標は現在の目標（16EX / 17EX / 17IX / 18IX）。EXクリアはIXの目標も達成扱いです。「あと少し」はそのレベルをクリア済みで目標ランクに届いていない譜面です。
+        </p>
       </section>
 
       <section className="card">

@@ -14,6 +14,7 @@ import {
   computeStats,
   rankTitleCandidates,
   bestTitleMatch,
+  FLARE_ORDER,
   computeCloseCalls,
   computeVersus,
   findPhashCandidates,
@@ -404,10 +405,10 @@ app.get("/api/stats", async (c) => {
   const { results: masterRows } = await c.env.DB
     .prepare(
       `SELECT ch.chart_id AS chart_id, ch.play_style AS play_style, ch.level AS level,
-              ch.max_ex AS max_ex, s.version AS version
+              ch.max_ex AS max_ex, s.version AS version, s.title AS title
        FROM charts ch JOIN songs s ON s.song_id = ch.song_id`,
     )
-    .all<{ chart_id: string; play_style: string; level: number | null; max_ex: number | null; version: string | null }>();
+    .all<{ chart_id: string; play_style: string; level: number | null; max_ex: number | null; version: string | null; title: string | null }>();
   const { results: playRows } = await c.env.DB
     .prepare("SELECT chart_id, score, ex_score, rank, clear_lamp, flare_rank, played_at FROM scores")
     .all<{ chart_id: string | null; score: number; ex_score: number | null; rank: string | null; clear_lamp: string | null; played_at: number }>();
@@ -417,6 +418,7 @@ app.get("/api/stats", async (c) => {
     level: r.level,
     max_ex: r.max_ex,
     category: songCategory(r.version),
+    title: r.title,
   }));
   return c.json(computeStats(master, playRows, Date.now()));
 });
@@ -1036,6 +1038,25 @@ app.get("/api/browse", async (c) => {
     for (const r of rows) {
       const d = detail.get(r.chart_id);
       if (d) Object.assign(r, { best_ex_score: d.ex_score, best_rank: d.rank, best_lamp: d.clear_lamp });
+    }
+    // Highest flare rank achieved on any play of each chart on this page.
+    const { results: flareRows } = await c.env.DB
+      .prepare(
+        `SELECT chart_id, flare_rank FROM scores
+         WHERE chart_id IN (${placeholders}) AND flare_rank IS NOT NULL`,
+      )
+      .bind(...ids)
+      .all<{ chart_id: string; flare_rank: string }>();
+    const bestFlare = new Map<string, string>();
+    for (const fr of flareRows) {
+      const cur = bestFlare.get(fr.chart_id);
+      if (!cur || (FLARE_ORDER[fr.flare_rank] ?? 0) > (FLARE_ORDER[cur] ?? 0)) {
+        bestFlare.set(fr.chart_id, fr.flare_rank);
+      }
+    }
+    for (const r of rows) {
+      const f = bestFlare.get(r.chart_id);
+      if (f) Object.assign(r, { best_flare_rank: f });
     }
   }
   for (const r of rows) r.category = songCategory((r as { version?: string | null }).version);

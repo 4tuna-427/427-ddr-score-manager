@@ -53,6 +53,13 @@ export function ChartPage() {
     if (best == null || (LAMP_ORDER[s.clear_lamp] ?? -1) > (LAMP_ORDER[best] ?? -1)) return s.clear_lamp
     return best
   }, null)
+  const FLARE_ORDER_WEB: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, EX: 10 }
+  const bestFlare = items.reduce<string | null>((best, s) => {
+    if (!s.flare_rank) return best
+    if (s.clear_lamp === 'FAILED') return best
+    if (best == null || (FLARE_ORDER_WEB[s.flare_rank] ?? -1) > (FLARE_ORDER_WEB[best] ?? -1)) return s.flare_rank
+    return best
+  }, null)
 
   const doSaveTarget = async () => {
     if (!chartId) return
@@ -92,6 +99,7 @@ export function ChartPage() {
           <p className="muted">
             {chart.category && <span className={`badge cat-${chart.category.toLowerCase()}`}>{chart.category}</span>}{' '}
             {chart.artist || ''} / <DiffBadge style={chart.play_style} difficulty={chart.difficulty} level={chart.level} />{chart.version ? ` ・ ${chart.version}` : ''}
+            {bestFlare && <> ・ 最高フレア {bestFlare}クリア</>}
           </p>
         </div>
       </div>

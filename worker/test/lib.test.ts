@@ -601,3 +601,37 @@ test("computeStats: flare distribution uses each chart's best flare rank", () =>
     { flare_rank: "IX", charts: 1 },
   ]);
 });
+
+test("computeStats: flare targets count cleared charts at/above the target rank", () => {
+  const master: any[] = [];
+  const plays: any[] = [];
+  const add = (id: string, level: number, lamp: string, flare: string | null) => {
+    master.push({ chart_id: `${id}|SP|EXPERT`, play_style: "SP", level, max_ex: null, category: "GOLD", title: id });
+    plays.push({ chart_id: `${id}|SP|EXPERT`, score: 900000, rank: "AA", clear_lamp: lamp, flare_rank: flare, played_at: 1764000000000 });
+  };
+  add("lv16ex", 16, "CLEAR", "EX");    // 16EX achieved
+  add("lv17ex", 17, "CLEAR", "EX");    // 17EX achieved, and 17IX too (EX >= IX)
+  add("lv17v8", 17, "CLEAR", "VIII");  // candidate for both 17 targets
+  add("lv17norm", 17, "CLEAR", null);  // candidate (cleared without flare)
+  add("lv18fail", 18, "FAILED", null); // never cleared: nowhere
+  add("lv18ix", 18, "CLEAR", "IX");    // 18IX achieved
+  const s = computeStats(master, plays, 1764014400000);
+  const t16 = s.flare.targets.find((t) => t.level === 16 && t.min_rank === "EX")!;
+  const t17ex = s.flare.targets.find((t) => t.level === 17 && t.min_rank === "EX")!;
+  const t17ix = s.flare.targets.find((t) => t.level === 17 && t.min_rank === "IX")!;
+  const t18 = s.flare.targets.find((t) => t.level === 18 && t.min_rank === "IX")!;
+  assert.equal(t16.achieved_count, 1);
+  assert.equal(t17ex.achieved_count, 1);
+  assert.equal(t17ix.achieved_count, 1); // the EX clear satisfies IX too
+  assert.equal(t17ix.candidate_count, 2); // VIII clear + normal clear, VIII first
+  assert.equal(t17ix.candidates[0].best_flare_rank, "VIII");
+  assert.equal(t17ix.candidates[1].best_flare_rank, null);
+  assert.equal(t18.achieved_count, 1);
+  assert.equal(t18.candidate_count, 0); // the FAILED-only chart is not a candidate
+  // by_rank is cleared-only now: EX x2, IX x1, VIII x1
+  assert.deepEqual(s.flare.by_rank, [
+    { flare_rank: "EX", charts: 2 },
+    { flare_rank: "IX", charts: 1 },
+    { flare_rank: "VIII", charts: 1 },
+  ]);
+});

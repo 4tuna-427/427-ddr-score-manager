@@ -680,12 +680,21 @@ export const FLARE_ORDER: Record<string, number> = {
   I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, EX: 10,
 };
 
+/** The user's current flare clear targets: chart level x minimum flare rank. */
+export const FLARE_TARGETS: { level: number; min_rank: string }[] = [
+  { level: 16, min_rank: "EX" },
+  { level: 17, min_rank: "EX" },
+  { level: 17, min_rank: "IX" },
+  { level: 18, min_rank: "IX" },
+];
+
 export interface StatMasterChart {
   chart_id: string;
   play_style: string;
   level: number | null;
   category: SongCategory | null;
   max_ex?: number | null;
+  title?: string | null;
 }
 
 export interface AchievementBucket {
@@ -712,8 +721,26 @@ export interface StatsResult {
   ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[];
   /** Days with plays in the last 365 JST days (sparse; days without plays are omitted). */
   calendar: { date: string; plays: number }[];
-  /** Per-chart best flare rank distribution (strongest first). */
-  flare: { by_rank: { flare_rank: string; charts: number }[]; charts_with_flare: number };
+  /** Per-chart best flare rank on a clear (strongest first), plus target progress. */
+  flare: {
+    by_rank: { flare_rank: string; charts: number }[];
+    charts_with_flare: number;
+    /**
+     * Progress toward FLARE_TARGETS (level x minimum flare rank). A chart
+     * counts as achieved when its best flare rank on a clear reaches the
+     * target (an EX clear also satisfies an IX target). Candidates are
+     * charts at that level already cleared below the target rank, closest
+     * first. Lists are capped; counts are exact.
+     */
+    targets: {
+      level: number;
+      min_rank: string;
+      achieved: { chart_id: string; title: string | null; play_style: string; flare_rank: string }[];
+      achieved_count: number;
+      candidates: { chart_id: string; title: string | null; play_style: string; best_flare_rank: string | null }[];
+      candidate_count: number;
+    }[];
+  };
 }
 
 const emptyBucket = (): AchievementBucket => ({
@@ -770,6 +797,7 @@ export function computeStats(
   const bestLamp = new Map<string, number>();
   const bestRank = new Map<string, number>();
   const bestEx = new Map<string, number>();
+  /** Best flare rank value per chart across CLEARED plays (0 = cleared without the flare gauge). */
   const bestFlare = new Map<string, number>();
   const playDays = new Set<string>();
   const playsByDay = new Map<string, number>();
@@ -790,8 +818,13 @@ export function computeStats(
     if (lamp > (bestLamp.get(p.chart_id) ?? -1)) bestLamp.set(p.chart_id, lamp);
     const rank = p.rank != null ? RANK_ORDER.indexOf(p.rank) : -1;
     if (rank > (bestRank.get(p.chart_id) ?? -1)) bestRank.set(p.chart_id, rank);
-    const flare = p.flare_rank != null ? (FLARE_ORDER[p.flare_rank] ?? -1) : -1;
-    if (flare > (bestFlare.get(p.chart_id) ?? -1)) bestFlare.set(p.chart_id, flare);
+    // "Highest flare gauge cleared" only counts plays with a clear lamp.
+    // A badge-like read on a FAILED screen must not count as a clear.
+    const cleared = p.clear_lamp != null && p.clear_lamp !== "FAILED";
+    if (cleared) {
+      const flare = p.flare_rank != null ? (FLARE_ORDER[p.flare_rank] ?? 0) : 0;
+      if (flare > (bestFlare.get(p.chart_id) ?? -1)) bestFlare.set(p.chart_id, flare);
+    }
     if (p.ex_score != null) {
       if (p.ex_score > (bestEx.get(p.chart_id) ?? -1)) bestEx.set(p.chart_id, p.ex_score);
       const mx = chartMaxEx.get(p.chart_id);
@@ -892,6 +925,48 @@ export function computeStats(
     const f = bestFlare.get(ch.chart_id);
     if (f != null && f > 0) flareCounts.set(f, (flareCounts.get(f) ?? 0) + 1);
   }
+
+  // Flare clear targets (level x minimum rank): achieved charts and
+  // already-cleared candidates below the target rank.
+  const rankLabel = (v: number): string | null =>
+    v <= 0 ? null : Object.keys(FLARE_ORDER).find((k) => FLARE_ORDER[k] === v) ?? null;
+  const flareTargets: StatsResult["flare"]["targets"] = FLARE_TARGETS.map((t) => {
+    const need = FLARE_ORDER[t.min_rank] ?? 0;
+    const achieved: StatsResult["flare"]["targets"][number]["achieved"] = [];
+    const candidates: (StatsResult["flare"]["targets"][number]["candidates"][number] & { v: number })[] = [];
+    for (const ch of masterCharts) {
+      if (ch.level !== t.level) continue;
+      const best = bestFlare.get(ch.chart_id);
+      if (best == null) continue; // never cleared
+      if (best >= need) {
+        achieved.push({
+          chart_id: ch.chart_id,
+          title: ch.title ?? null,
+          play_style: ch.play_style,
+          flare_rank: rankLabel(best)!,
+        });
+      } else {
+        candidates.push({
+          chart_id: ch.chart_id,
+          title: ch.title ?? null,
+          play_style: ch.play_style,
+          best_flare_rank: rankLabel(best),
+          v: best,
+        });
+      }
+    }
+    achieved.sort((a, b) => a.play_style.localeCompare(b.play_style) || (a.title ?? "").localeCompare(b.title ?? ""));
+    candidates.sort((a, b) => b.v - a.v || (a.title ?? "").localeCompare(b.title ?? ""));
+    return {
+      level: t.level,
+      min_rank: t.min_rank,
+      achieved: achieved.slice(0, 50),
+      achieved_count: achieved.length,
+      candidates: candidates.slice(0, 20).map(({ v: _v, ...rest }) => rest),
+      candidate_count: candidates.length,
+    };
+  });
+
   const flare = {
     by_rank: [...flareCounts.entries()]
       .sort((a, b) => b[0] - a[0])
@@ -900,6 +975,7 @@ export function computeStats(
         charts,
       })),
     charts_with_flare: [...flareCounts.values()].reduce((a, b) => a + b, 0),
+    targets: flareTargets,
   };
 
   return { totals, by_level, by_category, monthly: months, ex_rate_by_level, calendar, flare };
