@@ -12,7 +12,7 @@ interface QueueContextValue {
   refresh: () => Promise<void>
   enqueue: (file: Blob, name: string, source: string) => Promise<void>
   remove: (id: string) => Promise<void>
-  processNow: () => Promise<void>
+  processNow: (opts?: { includeErrors?: boolean }) => Promise<void>
   clearResults: () => void
 }
 
@@ -38,9 +38,10 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const processNow = useCallback(async () => {
+  const processNow = useCallback(async (opts?: { includeErrors?: boolean }) => {
     if (runningRef.current) return
     if (!navigator.onLine) return
+    const includeErrors = opts?.includeErrors ?? true
     runningRef.current = true
     setProcessing(true)
     try {
@@ -48,7 +49,9 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const list = await listQueueItems()
         setItems(list)
-        const next = list.find((i) => (i.status === 'pending' || i.status === 'error') && !attempted.has(i.id))
+        const next = list.find(
+          (i) => (i.status === 'pending' || (includeErrors && i.status === 'error')) && !attempted.has(i.id),
+        )
         if (!next) break
         attempted.add(next.id)
         const sending: QueueItem = { ...next, status: 'sending', error: undefined }
@@ -92,8 +95,9 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     const onOnline = () => processNow()
     window.addEventListener('online', onOnline)
     // Pick up items written by the Service Worker (share target) while the app is open.
+    // Poll pending items only; error items wait for online recovery or manual retry.
     const timer = window.setInterval(() => {
-      refresh().then(() => processNow())
+      refresh().then(() => processNow({ includeErrors: false }))
     }, 5000)
     return () => {
       window.removeEventListener('online', onOnline)

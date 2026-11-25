@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { getCloseCalls, getStats, getVersus, type AchievementBucket, type CloseCall, type StatsResponse, type VersusResponse } from '../lib/api'
+import { getCloseCalls, getStats, getTargets, getVersus, type AchievementBucket, type CloseCall, type StatsResponse, type Target, type VersusResponse } from '../lib/api'
 import { useIsDark } from '../lib/theme'
 import { DiffBadge } from '../components/DiffBadge'
 import { fmtDate } from '../components/ScoreList'
+
+const LAMP_ORDER: Record<string, number> = { FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6 }
 
 /** JST calendar date "YYYY-MM-DD" for an epoch-ms timestamp. */
 function jstDateString(ms: number): string {
@@ -76,6 +78,7 @@ export function StatsPage() {
   const [error, setError] = useState('')
   const [style, setStyle] = useState<'SP' | 'DP'>('SP')
   const [closeCalls, setCloseCalls] = useState<CloseCall[] | null>(null)
+  const [targets, setTargets] = useState<Target[] | null>(null)
   const [versus, setVersus] = useState<VersusResponse | null>(null)
 
   useEffect(() => {
@@ -83,6 +86,7 @@ export function StatsPage() {
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
     getCloseCalls().then((r) => setCloseCalls(r.items)).catch(() => setCloseCalls([]))
+    getTargets().then((r) => setTargets(r.items)).catch(() => setTargets([]))
     getVersus().then(setVersus).catch(() => setVersus({ opponents: [], recent: [] }))
   }, [])
 
@@ -120,6 +124,60 @@ export function StatsPage() {
                 </Link>
               </li>
             ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="card">
+        <h3>設定中の目標</h3>
+        {targets === null ? (
+          <p className="muted">読み込み中…</p>
+        ) : targets.length === 0 ? (
+          <p className="muted">設定中の目標はありません。譜面ページから目標を設定できます。</p>
+        ) : (
+          <ul className="update-list cap-list">
+            {targets.map((tg) => {
+              const scoreOk = tg.target_score != null && tg.best_score != null && tg.best_score >= tg.target_score
+              const lampOk =
+                tg.target_lamp != null &&
+                tg.best_lamp != null &&
+                (LAMP_ORDER[tg.best_lamp] ?? -1) >= (LAMP_ORDER[tg.target_lamp] ?? 99)
+              return (
+                <li key={tg.chart_id}>
+                  <Link to={`/charts/${encodeURIComponent(tg.chart_id)}`}>
+                    <span className="update-title">{tg.song_title || '(曲名不明)'}</span>
+                    <DiffBadge style={tg.play_style} difficulty={tg.difficulty} level={tg.level} />
+                    <span className="update-score">
+                      {tg.target_score != null && (
+                        <span>
+                          {tg.target_score.toLocaleString()}：
+                          {tg.best_score == null ? (
+                            <span className="muted">未プレイ</span>
+                          ) : scoreOk ? (
+                            <span className="diff up">達成</span>
+                          ) : (
+                            <span>あと{(tg.target_score - tg.best_score).toLocaleString()}点</span>
+                          )}
+                        </span>
+                      )}
+                      {tg.target_score != null && tg.target_lamp != null && ' / '}
+                      {tg.target_lamp != null && (
+                        <span>
+                          {tg.target_lamp}：
+                          {tg.best_lamp == null ? (
+                            <span className="muted">未プレイ</span>
+                          ) : lampOk ? (
+                            <span className="diff up">達成</span>
+                          ) : (
+                            <span>あと{(LAMP_ORDER[tg.target_lamp] ?? 0) - (LAMP_ORDER[tg.best_lamp] ?? 0)}段階</span>
+                          )}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

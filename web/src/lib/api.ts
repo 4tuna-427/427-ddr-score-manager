@@ -398,6 +398,7 @@ export interface Target {
   song_title: string | null
   artist: string | null
   best_score: number | null
+  best_lamp?: string | null
 }
 
 export function getTarget(chartId: string): Promise<{ target: Target | null }> {

@@ -15,6 +15,7 @@ import {
   rankTitleCandidates,
   bestTitleMatch,
   FLARE_ORDER,
+  LAMP_RANK,
   computeCloseCalls,
   computeVersus,
   findPhashCandidates,
@@ -53,7 +54,7 @@ app.use(
   "/api/*",
   cors({
     origin: "*",
-    allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "X-API-Token"],
     maxAge: 86400,
   }),
@@ -79,6 +80,14 @@ function genId(): string {
   crypto.getRandomValues(bytes);
   const rand = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return `${Date.now().toString(36)}${rand}`;
+}
+
+const D1_IN_CHUNK = 90;
+
+function chunkArray<T>(arr: T[], size = D1_IN_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 interface ChartDbRow {
@@ -174,11 +183,11 @@ async function attachCandidates<T extends Record<string, any>>(db: D1Database, r
   }
   const songIds = [...new Set([...byTitle.values()].flat().map((cand) => cand.song_id))];
   const chartByKey = new Map<string, string>();
-  if (songIds.length > 0) {
-    const placeholders = songIds.map(() => "?").join(", ");
+  for (const chunk of chunkArray(songIds)) {
+    const placeholders = chunk.map(() => "?").join(", ");
     const { results: charts } = await db
       .prepare(`SELECT chart_id, song_id, play_style, difficulty FROM charts WHERE song_id IN (${placeholders})`)
-      .bind(...songIds)
+      .bind(...chunk)
       .all<{ chart_id: string; song_id: string; play_style: string; difficulty: string }>();
     for (const ch of charts) chartByKey.set(`${ch.song_id}|${ch.play_style}|${ch.difficulty}`, ch.chart_id);
   }
@@ -372,14 +381,14 @@ app.get("/api/summary/latest-day", async (c) => {
     .all<Record<string, unknown> & { id: string; chart_id: string | null; score: number; played_at: number }>();
   const chartIds = [...new Set(dayRows.map((r) => r.chart_id).filter((x): x is string => !!x))];
   const prevBest = new Map<string, number>();
-  if (chartIds.length > 0) {
-    const placeholders = chartIds.map(() => "?").join(", ");
+  for (const chunk of chunkArray(chartIds)) {
+    const placeholders = chunk.map(() => "?").join(", ");
     const { results: prevRows } = await c.env.DB
       .prepare(
         `SELECT chart_id, MAX(score) AS best FROM scores
          WHERE chart_id IN (${placeholders}) AND played_at < ? GROUP BY chart_id`,
       )
-      .bind(...chartIds, start)
+      .bind(...chunk, start)
       .all<{ chart_id: string; best: number }>();
     for (const r of prevRows) prevBest.set(r.chart_id, r.best);
   }
@@ -804,10 +813,35 @@ async function getTargetWithChart(
   return row ?? null;
 }
 
+async function fetchBestLamps(db: D1Database, chartIds: string[]): Promise<Map<string, string>> {
+  const best = new Map<string, string>();
+  for (const chunk of chunkArray(chartIds)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const { results } = await db
+      .prepare(
+        `SELECT chart_id, clear_lamp FROM scores
+         WHERE chart_id IN (${placeholders}) AND clear_lamp IS NOT NULL`,
+      )
+      .bind(...chunk)
+      .all<{ chart_id: string; clear_lamp: string }>();
+    for (const r of results) {
+      const cur = best.get(r.chart_id);
+      if (!cur || (LAMP_RANK[r.clear_lamp] ?? -1) > (LAMP_RANK[cur] ?? -1)) {
+        best.set(r.chart_id, r.clear_lamp);
+      }
+    }
+  }
+  return best;
+}
+
 app.get("/api/targets", async (c) => {
   const chartId = c.req.query("chart_id");
   if (chartId) {
     const target = await getTargetWithChart(c.env.DB, chartId);
+    if (target) {
+      const lamps = await fetchBestLamps(c.env.DB, [chartId]);
+      target.best_lamp = lamps.get(chartId) ?? null;
+    }
     return c.json({ target });
   }
   const { results } = await c.env.DB
@@ -820,7 +854,9 @@ app.get("/api/targets", async (c) => {
        JOIN songs s ON s.song_id = c.song_id
        ORDER BY s.title, c.play_style, c.level`,
     )
-    .all();
+    .all<Record<string, unknown> & { chart_id: string }>();
+  const lamps = await fetchBestLamps(c.env.DB, results.map((r) => r.chart_id));
+  for (const r of results) r.best_lamp = lamps.get(r.chart_id) ?? null;
   return c.json({ items: results });
 });
 
@@ -978,8 +1014,9 @@ app.get("/api/browse", async (c) => {
   const where: string[] = [];
   const binds: unknown[] = [];
   if (q) {
-    where.push("(s.title_normalized LIKE ? OR s.artist LIKE ?)");
-    binds.push(`%${normalizeTitle(q)}%`, `%${q}%`);
+    const esc = (s: string) => s.replace(/[%_\\]/g, "\\$&");
+    where.push("(s.title_normalized LIKE ? ESCAPE '\\' OR s.artist LIKE ? ESCAPE '\\')");
+    binds.push(`%${esc(normalizeTitle(q))}%`, `%${esc(q)}%`);
   }
   if (style === "SP" || style === "DP") { where.push("c.play_style = ?"); binds.push(style); }
   if (difficulty) { where.push("c.difficulty = ?"); binds.push(difficulty); }
@@ -1020,41 +1057,42 @@ app.get("/api/browse", async (c) => {
   // Rank/lamp/EX of the personal-best play (latest row achieving the best score).
   const ids = rows.filter((r) => r.best_score != null).map((r) => r.chart_id);
   if (ids.length > 0) {
-    const placeholders = ids.map(() => "?").join(", ");
-    const { results: bestRows } = await c.env.DB
-      .prepare(
-        `SELECT chart_id, ex_score, rank, clear_lamp FROM scores
-         WHERE chart_id IN (${placeholders}) ORDER BY score DESC, played_at DESC`,
-      )
-      .bind(...ids)
-      .all<{ chart_id: string; ex_score: number | null; rank: string | null; clear_lamp: string | null }>();
     const picked = new Set<string>();
     const detail = new Map<string, { ex_score: number | null; rank: string | null; clear_lamp: string | null }>();
-    for (const br of bestRows) {
-      if (picked.has(br.chart_id)) continue;
-      picked.add(br.chart_id);
-      detail.set(br.chart_id, { ex_score: br.ex_score, rank: br.rank, clear_lamp: br.clear_lamp });
+    const bestFlare = new Map<string, string>();
+    for (const chunk of chunkArray(ids)) {
+      const placeholders = chunk.map(() => "?").join(", ");
+      const { results: bestRows } = await c.env.DB
+        .prepare(
+          `SELECT chart_id, ex_score, rank, clear_lamp FROM scores
+           WHERE chart_id IN (${placeholders}) ORDER BY score DESC, played_at DESC`,
+        )
+        .bind(...chunk)
+        .all<{ chart_id: string; ex_score: number | null; rank: string | null; clear_lamp: string | null }>();
+      for (const br of bestRows) {
+        if (picked.has(br.chart_id)) continue;
+        picked.add(br.chart_id);
+        detail.set(br.chart_id, { ex_score: br.ex_score, rank: br.rank, clear_lamp: br.clear_lamp });
+      }
+      // Highest flare rank achieved on any cleared play of each chart on this page.
+      const { results: flareRows } = await c.env.DB
+        .prepare(
+          `SELECT chart_id, flare_rank FROM scores
+           WHERE chart_id IN (${placeholders}) AND flare_rank IS NOT NULL
+             AND clear_lamp IS NOT NULL AND clear_lamp <> 'FAILED'`,
+        )
+        .bind(...chunk)
+        .all<{ chart_id: string; flare_rank: string }>();
+      for (const fr of flareRows) {
+        const cur = bestFlare.get(fr.chart_id);
+        if (!cur || (FLARE_ORDER[fr.flare_rank] ?? 0) > (FLARE_ORDER[cur] ?? 0)) {
+          bestFlare.set(fr.chart_id, fr.flare_rank);
+        }
+      }
     }
     for (const r of rows) {
       const d = detail.get(r.chart_id);
       if (d) Object.assign(r, { best_ex_score: d.ex_score, best_rank: d.rank, best_lamp: d.clear_lamp });
-    }
-    // Highest flare rank achieved on any play of each chart on this page.
-    const { results: flareRows } = await c.env.DB
-      .prepare(
-        `SELECT chart_id, flare_rank FROM scores
-         WHERE chart_id IN (${placeholders}) AND flare_rank IS NOT NULL`,
-      )
-      .bind(...ids)
-      .all<{ chart_id: string; flare_rank: string }>();
-    const bestFlare = new Map<string, string>();
-    for (const fr of flareRows) {
-      const cur = bestFlare.get(fr.chart_id);
-      if (!cur || (FLARE_ORDER[fr.flare_rank] ?? 0) > (FLARE_ORDER[cur] ?? 0)) {
-        bestFlare.set(fr.chart_id, fr.flare_rank);
-      }
-    }
-    for (const r of rows) {
       const f = bestFlare.get(r.chart_id);
       if (f) Object.assign(r, { best_flare_rank: f });
     }
