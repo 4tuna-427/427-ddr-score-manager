@@ -26,3 +26,4 @@ migrations_dir = "../migrations"
 [[kv_namespaces]]
 binding = "JACKETS"
 id = "83c0753e3e9847408b9cb80dd0cb1613"
+remote = true
