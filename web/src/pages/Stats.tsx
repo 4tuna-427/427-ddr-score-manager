@@ -271,7 +271,8 @@ export function StatsPage() {
             <h4>
               Lv{t.level} フレア{t.min_rank}クリア：
               <span className="flare-target-count">達成 {t.achieved_count}譜面</span>
-              <span className="muted">（あと少し {t.candidate_count}譜面）</span>
+              <span className="muted">（あと少し {t.candidate_count}譜面）</span>{' '}
+              <Link to={`/browse?level=${t.level}`}>Lv{t.level}の譜面一覧</Link>
             </h4>
             {t.achieved.length > 0 && (
               <ul className="update-list cap-list">

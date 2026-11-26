@@ -177,6 +177,14 @@ input[type="file"] { padding: 8px; width: 100%; }
 .browse-filters select { width: 100%; }
 .browse-filters input { width: 100%; }
 
+/* Level quick buttons on the browse page (main range 16-18 first) */
+.level-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.level-quick-btn {
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font-weight: 700; cursor: pointer;
+}
+.level-quick-btn.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+
 /* Stats page */
 .stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 16px; }
 .stat-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 6px; text-align: center; display: flex; flex-direction: column; gap: 2px; }

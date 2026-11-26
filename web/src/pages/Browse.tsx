@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { browseCharts, getBrowseFacets, type BrowseItem } from '../lib/api'
 import { exRatePercent } from '../lib/stats'
 import { fmtDate } from '../components/ScoreList'
@@ -9,15 +9,48 @@ import JacketThumb from '../components/JacketThumb'
 const DIFFS = ['BEGINNER', 'BASIC', 'DIFFICULT', 'EXPERT', 'CHALLENGE']
 const PAGE = 50
 
+/** One-tap level shortcuts: the user's main range (16-18) first. */
+const QUICK_LEVELS = [16, 17, 18, 15, 19]
+
+/**
+ * Browse filters persist across visits (localStorage). First visit defaults
+ * to Lv.16, the user's main range. The free-text query is not persisted.
+ * A ?level= URL parameter (e.g. from the Stats flare targets) wins over the
+ * saved level and is then remembered like any other change.
+ */
+const FILTER_KEY = 'ddr.browseFilters'
+interface SavedFilters { style: string; difficulty: string; level: string; version: string; category: string; played: string; sort: string }
+const DEFAULT_FILTERS: SavedFilters = { style: '', difficulty: '', level: '16', version: '', category: '', played: '', sort: 'level' }
+function loadFilters(): SavedFilters {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY)
+    if (raw) return { ...DEFAULT_FILTERS, ...(JSON.parse(raw) as Partial<SavedFilters>) }
+  } catch { /* storage unavailable: fall through to defaults */ }
+  return DEFAULT_FILTERS
+}
+
 export function BrowsePage() {
+  const [searchParams] = useSearchParams()
+  const [saved] = useState<SavedFilters>(loadFilters)
+  const urlLevel = (() => {
+    const v = searchParams.get('level')
+    return v != null && /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 19 ? v : null
+  })()
   const [q, setQ] = useState('')
-  const [style, setStyle] = useState('')
-  const [difficulty, setDifficulty] = useState('')
-  const [level, setLevel] = useState('')
-  const [version, setVersion] = useState('')
-  const [category, setCategory] = useState('')
-  const [played, setPlayed] = useState('')
-  const [sort, setSort] = useState('level')
+  const [style, setStyle] = useState(saved.style)
+  const [difficulty, setDifficulty] = useState(saved.difficulty)
+  const [level, setLevel] = useState(urlLevel ?? saved.level)
+  const [version, setVersion] = useState(saved.version)
+  const [category, setCategory] = useState(saved.category)
+  const [played, setPlayed] = useState(saved.played)
+  const [sort, setSort] = useState(saved.sort)
+
+  useEffect(() => {
+    try {
+      const data: SavedFilters = { style, difficulty, level, version, category, played, sort }
+      localStorage.setItem(FILTER_KEY, JSON.stringify(data))
+    } catch { /* storage unavailable: persistence is best-effort */ }
+  }, [style, difficulty, level, version, category, played, sort])
   const [versions, setVersions] = useState<string[]>([])
   const [items, setItems] = useState<BrowseItem[]>([])
   const [total, setTotal] = useState(0)
@@ -64,6 +97,25 @@ export function BrowsePage() {
     <div>
       <h1>楽曲・譜面を探す</h1>
       <div className="card form browse-filters">
+        <div className="level-quick" role="group" aria-label="レベル">
+          {QUICK_LEVELS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={level === String(n) ? 'level-quick-btn active' : 'level-quick-btn'}
+              onClick={() => setLevel(String(n))}
+            >
+              Lv{n}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={level === '' ? 'level-quick-btn active' : 'level-quick-btn'}
+            onClick={() => setLevel('')}
+          >
+            すべて
+          </button>
+        </div>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="曲名・アーティストで検索" />
         <div className="filter-grid">
           <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label="スタイル">
