@@ -567,6 +567,10 @@ export function planSync(
     if (e.level !== m.level) return true;
     // v2 masters carry notecounts; refresh them when they actually change.
     if (m.notes != null && (e.notes !== m.notes || e.freeze !== m.freeze || e.shock !== m.shock)) return true;
+    // max_ex is derived from the notecounts; a stale stored value (written
+    // by an older formula) must heal on sync even when the counts are
+    // unchanged. A null master max_ex never counts as a change.
+    if (m.max_ex != null && e.max_ex !== m.max_ex) return true;
     return false;
   });
   return { songUpserts, chartUpserts };

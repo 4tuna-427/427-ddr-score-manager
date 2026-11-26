@@ -302,6 +302,13 @@ test("planSync writes only new or actually-changed rows", async () => {
   plan = planSync([song()], [chart()], [song()], [chart({ notes: 501 })]);
   assert.equal(plan.chartUpserts.length, 1);
 
+  // Stale max_ex alone (notecounts unchanged) -> chart written so the
+  // stored value heals; a null master max_ex never counts as a change.
+  plan = planSync([song()], [chart({ max_ex: 1500 })], [song()], [chart()]);
+  assert.equal(plan.chartUpserts.length, 1);
+  plan = planSync([song()], [chart({ max_ex: 1500 })], [song()], [chart({ max_ex: null })]);
+  assert.equal(plan.chartUpserts.length, 0);
+
   // Tombstone appearing in the master -> song written.
   plan = planSync([song()], [chart()], [song({ deleted_at: "2026-01-01" })], [chart()]);
   assert.equal(plan.songUpserts.length, 1);
