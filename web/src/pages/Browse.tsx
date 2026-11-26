@@ -19,8 +19,13 @@ const QUICK_LEVELS = [16, 17, 18, 15, 19]
  * saved level and is then remembered like any other change.
  */
 const FILTER_KEY = 'ddr.browseFilters'
-interface SavedFilters { style: string; difficulty: string; level: string; version: string; category: string; played: string; sort: string }
-const DEFAULT_FILTERS: SavedFilters = { style: '', difficulty: '', level: '16', version: '', category: '', played: '', sort: 'level' }
+interface SavedFilters { style: string; difficulty: string; level: string; version: string; category: string; played: string; sort: string; dir: string }
+const DEFAULT_FILTERS: SavedFilters = { style: '', difficulty: '', level: '16', version: '', category: '', played: '', sort: 'level', dir: 'asc' }
+
+/** Default direction per sort key; the toggle button flips it. */
+const SORT_DEFAULT_DIR: Record<string, 'asc' | 'desc'> = {
+  level: 'asc', title: 'asc', notes: 'desc', bpm: 'desc', plays: 'desc', best: 'desc', recent: 'desc',
+}
 function loadFilters(): SavedFilters {
   try {
     const raw = localStorage.getItem(FILTER_KEY)
@@ -44,13 +49,19 @@ export function BrowsePage() {
   const [category, setCategory] = useState(saved.category)
   const [played, setPlayed] = useState(saved.played)
   const [sort, setSort] = useState(saved.sort)
+  const [dir, setDir] = useState<'asc' | 'desc'>(saved.dir === 'desc' ? 'desc' : 'asc')
 
   useEffect(() => {
     try {
-      const data: SavedFilters = { style, difficulty, level, version, category, played, sort }
+      const data: SavedFilters = { style, difficulty, level, version, category, played, sort, dir }
       localStorage.setItem(FILTER_KEY, JSON.stringify(data))
     } catch { /* storage unavailable: persistence is best-effort */ }
-  }, [style, difficulty, level, version, category, played, sort])
+  }, [style, difficulty, level, version, category, played, sort, dir])
+
+  const changeSort = (v: string) => {
+    setSort(v)
+    setDir(SORT_DEFAULT_DIR[v] ?? 'asc')
+  }
   const [versions, setVersions] = useState<string[]>([])
   const [items, setItems] = useState<BrowseItem[]>([])
   const [total, setTotal] = useState(0)
@@ -71,7 +82,7 @@ export function BrowsePage() {
         const res = await browseCharts({
           q, style, difficulty,
           level: level ? Number(level) : undefined,
-          version, category, played, sort,
+          version, category, played, sort, dir,
           limit: PAGE, offset,
         })
         if (req !== reqRef.current) return
@@ -84,7 +95,7 @@ export function BrowsePage() {
         if (req === reqRef.current) setLoading(false)
       }
     },
-    [q, style, difficulty, level, version, category, played, sort],
+    [q, style, difficulty, level, version, category, played, sort, dir],
   )
 
   // Refetch from the top whenever a filter changes (text input debounced).
@@ -146,12 +157,23 @@ export function BrowsePage() {
             <option value="played">プレイ済み</option>
             <option value="unplayed">未プレイ</option>
           </select>
-          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="並び順">
+          <select value={sort} onChange={(e) => changeSort(e.target.value)} aria-label="並び順">
             <option value="level">レベル順</option>
             <option value="title">曲名順</option>
+            <option value="notes">ノーツ数順</option>
+            <option value="bpm">BPM順</option>
+            <option value="plays">プレイ回数順</option>
             <option value="best">ベストスコア順</option>
             <option value="recent">最終プレイ順</option>
           </select>
+          <button
+            type="button"
+            className="sort-dir-btn"
+            onClick={() => setDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            aria-label="並び方向を切り替え"
+          >
+            {dir === 'asc' ? '昇順 ↑' : '降順 ↓'}
+          </button>
         </div>
       </div>
 
@@ -169,7 +191,7 @@ export function BrowsePage() {
                   <span className="muted">
                     {it.category && <span className={`badge cat-${it.category.toLowerCase()}`}>{it.category}</span>}{' '}
                     {it.artist || ''} ・ <DiffBadge style={it.play_style} difficulty={it.difficulty} level={it.level} />
-                    {it.bpm ? ` ・ BPM ${it.bpm}` : ''}{it.version ? ` ・ ${it.version}` : ''}
+                    {it.notes ? ` ・ ${it.notes}ノーツ` : ''}{it.bpm ? ` ・ BPM ${it.bpm}` : ''}{it.version ? ` ・ ${it.version}` : ''}
                   </span>
                   {it.plays != null && it.last_played != null && (
                     <span className="muted">{it.plays}プレイ ・ 最終 {fmtDate(it.last_played)}</span>

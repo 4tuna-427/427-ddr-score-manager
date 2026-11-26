@@ -77,11 +77,11 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes+shock を比較（charts が無い/notes が無い場合は 'no_master'）。不一致は needs_review=1。
 - レスポンス 201: `{score: <scores行>, previous: {score, ex_score, diff, played_at} | null}`（previous は同一 chart の直前レコード）
 
-### GET /api/browse?q=&style=&difficulty=&level=&version=&category=&played=&sort=&limit=&offset=
+### GET /api/browse?q=&style=&difficulty=&level=&version=&category=&played=&sort=&dir=&limit=&offset=
 → 譜面ブラウズ。マスタ全譜面に自己ベスト集計を結合して返す `{items, total}`。各 item には `category` が付く。
 - カテゴリ: 楽曲の収録バージョン（フォルダ＝初出バージョン。後から追加された譜面では分類しない）で判定する。CLASSIC = 1st〜X3 VS 2ndMIX / WHITE = (2013)〜A / GOLD = A20〜WORLD。判定は lib の `songCategory`（表記ゆれ吸収つき）。songs.version は「現行フォルダ ?? RemyWiki初出」の順で格納済みで、全1,485曲が分類できる（CLASSIC 479曲 / WHITE 306曲 / GOLD 700曲）。
 - 絞り込み: `q`（曲名の正規化部分一致 or アーティスト部分一致）、`style` SP/DP、`difficulty`、`level`（完全一致）、`version`（完全一致）、`category` = CLASSIC|WHITE|GOLD、`played` = played|unplayed
-- `sort`: level（既定）| title | best（ベストスコア降順、未プレイは最後）| recent（最終プレイ降順、未プレイは最後）
+- `sort`: level（既定）| title | notes（ノーツ数）| bpm | plays（プレイ回数）| best（ベストスコア）| recent（最終プレイ）。各キーに既定の方向があり（level/title=昇順、それ以外=降順）、`dir=asc|desc` で上書きできる。NULL の項目（ノーツ数なし・未プレイ等）は方向によらず常に最後。BPM は範囲表記（"80-160"）の場合に上限値で比較する。各行には `notes`（ノーツ数、無い譜面は null）も含まれる
 - 各 item: 譜面・曲情報＋ `best_score` / `plays` / `last_played`、ベスト記録の `best_ex_score` / `best_rank` / `best_lamp`、`has_jacket`（ジャケット画像が KV にある曲は 1）
 
 ### GET /api/jackets/:song_id

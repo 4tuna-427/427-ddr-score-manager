@@ -185,6 +185,12 @@ input[type="file"] { padding: 8px; width: 100%; }
 }
 .level-quick-btn.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 
+/* Sort direction toggle on the browse page */
+.sort-dir-btn {
+  width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font-weight: 700; cursor: pointer;
+}
+
 /* Stats page */
 .stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 16px; }
 .stat-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 6px; text-align: center; display: flex; flex-direction: column; gap: 2px; }

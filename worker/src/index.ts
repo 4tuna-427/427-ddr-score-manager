@@ -1016,6 +1016,8 @@ app.get("/api/browse", async (c) => {
   const category = (["CLASSIC", "WHITE", "GOLD"] as const).find((x) => x === categoryRaw) ?? null;
   const played = c.req.query("played") ?? "";
   const sort = c.req.query("sort") ?? "level";
+  const dirRaw = (c.req.query("dir") ?? "").toLowerCase();
+  const dir: "asc" | "desc" | null = dirRaw === "asc" || dirRaw === "desc" ? dirRaw : null;
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "50", 10) || 50, 1), 200);
   const offset = Math.max(parseInt(c.req.query("offset") ?? "0", 10) || 0, 0);
 
@@ -1047,14 +1049,25 @@ app.get("/api/browse", async (c) => {
     .bind(...binds)
     .first<{ n: number }>();
 
-  const orderSql =
-    sort === "best" ? "ORDER BY pb.best_score IS NULL, pb.best_score DESC, s.title" :
-    sort === "recent" ? "ORDER BY pb.last_played IS NULL, pb.last_played DESC, s.title" :
-    sort === "title" ? "ORDER BY s.title, c.play_style, c.level" :
-    "ORDER BY c.level, s.title, c.play_style";
+  // Sort keys with their default direction; ?dir=asc|desc overrides it.
+  // Nullable keys always sort NULLs last, in both directions.
+  const bpmValue =
+    "(CASE WHEN s.bpm LIKE '%-%' THEN CAST(substr(s.bpm, instr(s.bpm, '-') + 1) AS INTEGER) " +
+    "ELSE CAST(s.bpm AS INTEGER) END)";
+  const sortDefs: Record<string, { def: "asc" | "desc"; by: (d: string) => string }> = {
+    level: { def: "asc", by: (d) => `c.level IS NULL, c.level ${d}, s.title, c.play_style` },
+    title: { def: "asc", by: (d) => `s.title ${d}, c.play_style, c.level` },
+    notes: { def: "desc", by: (d) => `c.notes IS NULL, c.notes ${d}, s.title` },
+    bpm: { def: "desc", by: (d) => `${bpmValue} IS NULL, ${bpmValue} ${d}, s.title` },
+    plays: { def: "desc", by: (d) => `pb.plays IS NULL, pb.plays ${d}, s.title` },
+    best: { def: "desc", by: (d) => `pb.best_score IS NULL, pb.best_score ${d}, s.title` },
+    recent: { def: "desc", by: (d) => `pb.last_played IS NULL, pb.last_played ${d}, s.title` },
+  };
+  const sortDef = sortDefs[sort] ?? sortDefs.level;
+  const orderSql = `ORDER BY ${sortDef.by((dir ?? sortDef.def).toUpperCase())}`;
   const { results: rows } = await c.env.DB
     .prepare(
-      `SELECT c.chart_id, c.song_id, c.play_style, c.difficulty, c.level, c.max_ex,
+      `SELECT c.chart_id, c.song_id, c.play_style, c.difficulty, c.level, c.max_ex, c.notes,
               s.title, s.artist, s.version, s.bpm, s.has_jacket,
               pb.best_score, pb.plays, pb.last_played
        ${fromSql} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,

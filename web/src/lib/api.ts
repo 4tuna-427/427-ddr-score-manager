@@ -233,6 +233,7 @@ export interface BrowseItem {
   difficulty: string
   level: number | null
   max_ex: number | null
+  notes?: number | null
   title: string
   artist: string | null
   version: string | null
@@ -250,7 +251,7 @@ export interface BrowseItem {
 
 export function browseCharts(params: {
   q?: string; style?: string; difficulty?: string; level?: number
-  version?: string; category?: string; played?: string; sort?: string; limit?: number; offset?: number
+  version?: string; category?: string; played?: string; sort?: string; dir?: string; limit?: number; offset?: number
 }): Promise<{ items: BrowseItem[]; total: number }> {
   const qs = new URLSearchParams()
   if (params.q) qs.set('q', params.q)
@@ -261,6 +262,7 @@ export function browseCharts(params: {
   if (params.category) qs.set('category', params.category)
   if (params.played) qs.set('played', params.played)
   if (params.sort) qs.set('sort', params.sort)
+  if (params.dir) qs.set('dir', params.dir)
   qs.set('limit', String(params.limit ?? 50))
   qs.set('offset', String(params.offset ?? 0))
   return request(`/api/browse?${qs.toString()}`)
