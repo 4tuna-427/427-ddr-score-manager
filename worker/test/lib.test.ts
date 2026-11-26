@@ -15,6 +15,7 @@ import {
   expandMasterSong,
   judgeSumCheck,
   normalizeTitle,
+  computeReviewReasons,
   computeStats,
   rankTitleCandidates,
   bestTitleMatch,
@@ -815,4 +816,40 @@ test("computeReviewReasons & evaluateScore flag all inconsistency types", async 
     code: "max_combo_exceeds_notes",
     detail: { max_combo: 856, max_notes: 855 },
   });
+});
+
+test("judgeSumCheck: dropped freezes count as Miss (judgeSum = notes + freeze + shock - ok)", () => {
+  // 8ISMUTH OVERDRIV3 ESP: notes 649, freeze 96, no shock; one dropped freeze.
+  const chart: any = { notes: 649, freeze: 96, shock: null, level: 15, max_ex: 2235 };
+  const play: any = { marvelous: 563, perfect: 81, great: 4, good: 0, miss: 2, ok: 95, ex_score: 2140, score: 994310, level: 15 };
+  assert.equal(judgeSumCheck(play, chart), "match");
+  const ev = evaluateScore(play, chart, { songLinked: true, chartLinked: true });
+  assert.equal(ev.needs_review, false);
+  assert.deepEqual(ev.reasons, []);
+
+  // Same chart, all freezes held: judge sum must equal notes exactly.
+  assert.equal(judgeSumCheck({ ...play, miss: 1, ok: 96 }, chart), "match");
+  // One tap judgment missing despite the dropped freeze: still a mismatch,
+  // and the reported expectation includes the NG adjustment.
+  const short = { ...play, marvelous: 562 };
+  assert.equal(judgeSumCheck(short, chart), "check");
+  const reasons = computeReviewReasons(short, chart, { songLinked: true, chartLinked: true });
+  assert.deepEqual(reasons.find((r) => r.code === "judge_sum_mismatch")?.detail, { judge_sum: 649, expected: 650 });
+
+  // Shock chart: a hit shock adds a Miss, an avoided shock adds an O.K.
+  const shockChart: any = { notes: 812, freeze: 29, shock: 2, level: 15, max_ex: 2529 };
+  const base: any = { marvelous: 700, perfect: 100, great: 10, good: 2, score: 990000, level: 15 };
+  // 1 avoided + 1 hit: ok = 29 + 1, judge sum = 812 + 1 (hit) + 0 dropped freezes
+  assert.equal(judgeSumCheck({ ...base, miss: 1, ok: 30 }, shockChart), "match");
+  // both avoided, one freeze dropped: ok = 28 + 2, judge sum = 812 + 1
+  assert.equal(judgeSumCheck({ ...base, miss: 1, ok: 30 }, shockChart), "match");
+  // both hit: ok = 29, judge sum = 812 + 2
+  assert.equal(judgeSumCheck({ ...base, miss: 2, ok: 29 }, shockChart), "match");
+  // inconsistent combination still flags
+  assert.equal(judgeSumCheck({ ...base, miss: 0, ok: 29 }, shockChart), "check");
+
+  // Fallbacks: freeze or ok unknown -> plain notes comparison.
+  assert.equal(judgeSumCheck({ ...play, ok: null }, chart), "check"); // 650 != 649 without the identity
+  assert.equal(judgeSumCheck(play, { notes: 649, shock: null }), "check");
+  assert.equal(judgeSumCheck({ ...play, miss: 1, ok: null }, { notes: 649, shock: null }), "match");
 });

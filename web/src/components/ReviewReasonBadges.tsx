@@ -62,7 +62,7 @@ export function describeReason(r: ReviewReason): { label: string; detail: string
     case 'judge_sum_mismatch':
       return {
         label: '判定合計不一致',
-        detail: `読取合計 ${fmtNum(d.judge_sum)} ≠ マスタ総ノーツ ${fmtNum(d.expected)}`,
+        detail: `読取合計 ${fmtNum(d.judge_sum)} ≠ 期待合計 ${fmtNum(d.expected)}`,
         tone: 'score',
       }
     case 'ok_exceeds_max':

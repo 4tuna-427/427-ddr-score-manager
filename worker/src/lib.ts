@@ -202,12 +202,29 @@ export function judgeSum(p: Pick<PlayerExtraction, "marvelous" | "perfect" | "gr
 return (p.marvelous?? 0) + (p.perfect?? 0) + (p.great?? 0) + (p.good?? 0) + (p.miss?? 0);
 }
 
+/**
+ * Expected displayed judge sum for a full play of the chart.
+ * On the result screen a dropped freeze (N.G.) and a hit shock arrow both
+ * count toward the displayed Miss count, while held freezes and avoided
+ * shocks count as O.K., so: judgeSum = notes + freeze + shock - ok.
+ * Returns null when the identity cannot be applied (no master notes, or
+ * freeze / ok unknown); callers then fall back to the plain notes value.
+ */
+export function expectedJudgeSum(
+p: Pick<PlayerExtraction, "ok">,
+chart: ChartLike | null | undefined,
+): number | null {
+if (!chart || chart.notes == null || chart.freeze == null || p.ok == null) return null;
+return chart.notes + chart.freeze + (chart.shock ?? 0) - p.ok;
+}
+
 export function judgeSumCheck(
-p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss">,
+p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss" | "ok">,
 chart: ChartLike | null | undefined,
 ): JudgeSumCheck {
 if (!chart || chart.notes == null) return "no_master";
-return judgeSum(p) === chart.notes? "match": "check";
+const expected = expectedJudgeSum(p, chart) ?? chart.notes;
+return judgeSum(p) === expected? "match": "check";
 }
 
 export interface ScoreEvaluation {
@@ -280,7 +297,7 @@ export function computeReviewReasons(
       code: "judge_sum_mismatch",
       detail: {
         judge_sum: judgeSum(p),
-        expected: chart?.notes ?? 0,
+        expected: expectedJudgeSum(p, chart) ?? chart?.notes ?? 0,
       },
     });
   }
