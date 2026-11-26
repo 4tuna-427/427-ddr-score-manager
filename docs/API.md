@@ -32,7 +32,7 @@ CREATE TABLE charts (
   notes INTEGER,
   freeze INTEGER,
   shock INTEGER,
-  max_ex INTEGER                      -- (notes+freeze+shock)*3、算出不能なら NULL
+  max_ex INTEGER                      -- (notes+freeze)*3（notes は shock 込みの MAX COMBO）、算出不能なら NULL
 );
 CREATE INDEX idx_charts_song ON charts(song_id);
 
@@ -74,7 +74,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 処理: 画像を長辺1600px相当のまま Gemini に送信（Workers では受け取った Blob をそのまま中継し、リサイズはフロント側で行う前提。未リサイズでも受け付ける）→ 抽出 → 自プレイヤー確定 → 曲名寄せ → 検算 → D1保存。
 - 自プレイヤー確定: 環境変数 `MY_DANCER_NAME`（例 4TUNA）と正規化比較（大文字小文字無視、前後空白除去）で一致したプレイヤーを採用。ソロは player_1。バーサスで両方一致しない場合は player_1 を仮採用し `needs_review=1`、`raw_extraction` に全体を保存。
 - 曲名寄せ: 抽出タイトルを正規化（NFKC、ゼロ幅除去、記号・空白除去、小文字化）して songs.title_normalized と完全一致を検索。一意なら chart を特定（play_style+difficulty）。完全一致が無い場合はあいまい照合（末尾の【アーティスト】等の除去、混同しやすい文字 1/l/i・0/o の畳み込み、編集距離ベースの類似度）にフォールバックし、類似度 0.90 以上で2位に明確な差がある場合のみ自動で紐付ける。それ以外は chart_id=NULL、needs_review=1（要確認画面に候補が提示される）。
-- 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes+shock を比較（charts が無い/notes が無い場合は 'no_master'）。不一致は needs_review=1。
+- 検算: EX = (marvelous+ok)*3 + perfect*2 + great。判定合計 = marvelous+perfect+great+good+miss と charts.notes - COALESCE(charts.shock, 0) を比較（charts が無い/notes が無い場合は 'no_master'）。また ok > freeze + COALESCE(shock, 0)、max_combo > notes も異常値として検出し、不一致・異常は needs_review=1。
 - レスポンス 201: `{score: <scores行>, previous: {score, ex_score, diff, played_at} | null}`（previous は同一 chart の直前レコード）
 
 ### GET /api/browse?q=&style=&difficulty=&level=&version=&category=&played=&sort=&dir=&limit=&offset=

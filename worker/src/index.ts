@@ -271,6 +271,7 @@ async function attachReviewDetails<T extends Record<string, any>>(
     const chartLike = r.chart_id
       ? {
           notes: r.chart_notes ?? null,
+          freeze: r.chart_freeze ?? null,
           shock: r.chart_shock ?? null,
           level: r.chart_level ?? null,
           max_ex: r.chart_max_ex ?? null,
@@ -343,7 +344,8 @@ async function getScore(db: D1Database, id: string): Promise<Record<string, unkn
     .prepare(
       `SELECT s.*, songs.title AS song_title, songs.artist AS artist,
               charts.level AS chart_level, charts.notes AS chart_notes,
-              charts.shock AS chart_shock, charts.max_ex AS chart_max_ex
+              charts.freeze AS chart_freeze, charts.shock AS chart_shock,
+              charts.max_ex AS chart_max_ex
        FROM scores s
        LEFT JOIN songs ON songs.song_id = s.song_id
        LEFT JOIN charts ON charts.chart_id = s.chart_id
@@ -779,7 +781,8 @@ app.get("/api/scores", async (c) => {
     .prepare(
       `SELECT s.*, songs.title AS song_title, songs.artist AS artist,
               charts.level AS chart_level, charts.notes AS chart_notes,
-              charts.shock AS chart_shock, charts.max_ex AS chart_max_ex
+              charts.freeze AS chart_freeze, charts.shock AS chart_shock,
+              charts.max_ex AS chart_max_ex
        FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
        LEFT JOIN charts ON charts.chart_id = s.chart_id
        ${where} ORDER BY s.played_at DESC LIMIT ? OFFSET ?`,
@@ -1159,7 +1162,7 @@ app.post("/api/songs/custom", async (c) => {
   const songId = `custom_${genId()}`;
   const chartId = makeChartId(songId, body.play_style, body.difficulty);
   const artist = typeof body.artist === "string" && body.artist.trim() ? body.artist.trim() : null;
-  const maxEx = notes != null && freeze != null ? (notes + freeze + (shock ?? 0)) * 3 : null;
+  const maxEx = notes != null && freeze != null ? (notes + freeze) * 3 : null;
   const now = Date.now();
 
   await c.env.DB.batch([

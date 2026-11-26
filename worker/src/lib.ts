@@ -45,6 +45,8 @@ export type ReviewReasonCode =
   | "ex_mismatch"
   | "ex_invalid"
   | "judge_sum_mismatch"
+  | "ok_exceeds_max"
+  | "max_combo_exceeds_notes"
   | "player_unresolved";
 
 export interface ReviewReason {
@@ -205,7 +207,7 @@ p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss">,
 chart: ChartLike | null | undefined,
 ): JudgeSumCheck {
 if (!chart || chart.notes == null) return "no_master";
-const expected = chart.notes + (chart.shock?? 0);
+const expected = chart.notes - (chart.shock?? 0);
 return judgeSum(p) === expected? "match": "check";
 }
 
@@ -222,6 +224,7 @@ export type ScoreCheckInput = Pick<
 > & {
   score?: number | null;
   level?: number | null;
+  max_combo?: number | null;
 };
 
 /**
@@ -278,8 +281,21 @@ export function computeReviewReasons(
       code: "judge_sum_mismatch",
       detail: {
         judge_sum: judgeSum(p),
-        expected: (chart?.notes ?? 0) + (chart?.shock ?? 0),
+        expected: (chart?.notes ?? 0) - (chart?.shock ?? 0),
       },
+    });
+  }
+  if (chart?.freeze != null && p.ok != null && p.ok > chart.freeze + (chart.shock ?? 0)) {
+    const maxOk = chart.freeze + (chart.shock ?? 0);
+    reasons.push({
+      code: "ok_exceeds_max",
+      detail: { ok: p.ok, max_ok: maxOk },
+    });
+  }
+  if (chart?.notes != null && p.max_combo != null && p.max_combo > chart.notes) {
+    reasons.push({
+      code: "max_combo_exceeds_notes",
+      detail: { max_combo: p.max_combo, max_notes: chart.notes },
     });
   }
   if (opts.playerUnresolved) {
@@ -450,7 +466,7 @@ const nc = notecounts[key]?? {};
 const notes = toInt(nc.notes);
 const freeze = toInt(nc.freeze);
 const shock = toInt(nc.shock);
-const max_ex = notes!= null && freeze!= null? (notes + freeze + (shock?? 0)) * 3: null;
+const max_ex = notes!= null && freeze!= null? (notes + freeze) * 3: null;
 charts.push({
 chart_id: chartId(songId, style, diff),
 song_id: songId,

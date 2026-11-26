@@ -23,6 +23,8 @@ export interface ReviewReason {
     | 'ex_mismatch'
     | 'ex_invalid'
     | 'judge_sum_mismatch'
+    | 'ok_exceeds_max'
+    | 'max_combo_exceeds_notes'
     | 'player_unresolved'
   detail?: Record<string, number | string | null>
 }
@@ -63,6 +65,7 @@ export interface Score {
   artist?: string | null
   chart_level?: number | null
   chart_notes?: number | null
+  chart_freeze?: number | null
   chart_shock?: number | null
   chart_max_ex?: number | null
   /** Ranked link candidates for unlinked records (attached by the API). */

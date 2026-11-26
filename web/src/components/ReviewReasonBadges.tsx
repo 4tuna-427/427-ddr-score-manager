@@ -65,6 +65,18 @@ export function describeReason(r: ReviewReason): { label: string; detail: string
         detail: `読取合計 ${fmtNum(d.judge_sum)} ≠ マスタ総ノーツ ${fmtNum(d.expected)}`,
         tone: 'score',
       }
+    case 'ok_exceeds_max':
+      return {
+        label: 'O.K.数超過',
+        detail: `読取 O.K. (${fmtNum(d.ok)}) が譜面の最大O.K.数 (${fmtNum(d.max_ok)}) を超えています。`,
+        tone: 'score',
+      }
+    case 'max_combo_exceeds_notes':
+      return {
+        label: 'MAX COMBO超過',
+        detail: `読取 MAX COMBO (${fmtNum(d.max_combo)}) が譜面の最大コンボ数 (${fmtNum(d.max_notes)}) を超えています。`,
+        tone: 'score',
+      }
     case 'player_unresolved':
       return {
         label: 'プレイヤー未確定',

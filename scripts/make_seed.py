@@ -44,7 +44,7 @@ for s in songs:
             try: return int(x)
             except (TypeError, ValueError): return None
         notes, freeze, shock = _i(notes), _i(freeze), _i(shock)
-        max_ex = (notes+freeze+(shock or 0))*3 if notes is not None and freeze is not None else None
+        max_ex = (notes+freeze)*3 if notes is not None and freeze is not None else None
         cid = f"{s['id']}|{style}|{diff}"
         lines.append("INSERT OR REPLACE INTO charts (chart_id,song_id,play_style,difficulty,level,notes,freeze,shock,max_ex) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s);" % (
             q(cid), q(s["id"]), q(style), q(diff), q(lv), q(notes), q(freeze), q(shock), q(max_ex)))

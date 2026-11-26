@@ -9,6 +9,7 @@ import {
   choosePlayer,
   detectMasterFormat,
   diffKey,
+  evaluateScore,
   exCheck,
   expandMaster,
   expandMasterSong,
@@ -152,7 +153,44 @@ test("v2 expansion computes max_ex from notecounts", () => {
   assert.ok(spBeginner);
   const nc = masterV2[0].notecounts.sp_beginner;
   assert.equal(spBeginner.notes, nc.notes);
-  assert.equal(spBeginner.max_ex, (nc.notes + nc.freeze + (nc.shock ?? 0)) * 3);
+  assert.equal(spBeginner.max_ex, (nc.notes + nc.freeze) * 3);
+});
+
+test("v2 expansion and judgeSumCheck handle shock-arrow charts without double counting", () => {
+  const { charts } = expandMasterSong({
+    id: "cirno_math_academy",
+    title: "チルノのパーフェクトさんすう学園【ビートまりお】",
+    levels: { sp_challenge: 17 },
+    notecounts: { sp_challenge: { notes: 709, freeze: 163, shock: 146 } },
+  });
+  assert.equal(charts.length, 1);
+  assert.equal(charts[0].notes, 709);
+  assert.equal(charts[0].freeze, 163);
+  assert.equal(charts[0].shock, 146);
+  // max_ex = (tap_notes + freeze + shock) * 3 = ((709 - 146) + 163 + 146) * 3 = (709 + 163) * 3 = 2616
+  assert.equal(charts[0].max_ex, 2616);
+
+  // Tap judgments total 563 (= 709 - 146), O.K. = 309 (= 163 + 146), MAX COMBO = 709
+  const ev = evaluateScore(
+    {
+      marvelous: 500,
+      perfect: 50,
+      great: 10,
+      good: 3,
+      miss: 0,
+      ok: 309,
+      max_combo: 709,
+      ex_score: (500 + 309) * 3 + 50 * 2 + 10,
+      score: 990000,
+      level: 17,
+    },
+    charts[0],
+    { songLinked: true, chartLinked: true },
+  );
+  assert.equal(ev.judge_sum_check, "match");
+  assert.equal(ev.ex_check, "match");
+  assert.equal(ev.needs_review, false);
+  assert.deepEqual(ev.reasons, []);
 });
 
 test("parsePlayedAt accepts plausible ISO times and rejects bad ones", async () => {
@@ -738,4 +776,43 @@ test("computeReviewReasons & evaluateScore flag all inconsistency types", async 
     { songLinked: true, chartLinked: true },
   );
   assert.equal(zeroEx.some((r) => r.code === "ex_invalid" && r.detail?.reason === "missing_or_zero"), true);
+
+  // O.K. exceeds freeze + shock
+  const shockChart = { notes: 709, freeze: 163, shock: 146, level: 17, max_ex: 2616 };
+  const overOk = computeReviewReasons(
+    {
+      ...basePlayer,
+      level: 17,
+      marvelous: 563,
+      perfect: 0,
+      ok: 310,
+      ex_score: (563 + 310) * 3,
+      max_combo: 709,
+    },
+    shockChart,
+    { songLinked: true, chartLinked: true },
+  );
+  assert.deepEqual(overOk.find((r) => r.code === "ok_exceeds_max"), {
+    code: "ok_exceeds_max",
+    detail: { ok: 310, max_ok: 309 },
+  });
+
+  // MAX COMBO exceeds chart.notes
+  const overCombo = computeReviewReasons(
+    {
+      ...basePlayer,
+      level: 17,
+      marvelous: 563,
+      perfect: 0,
+      ok: 309,
+      ex_score: 2616,
+      max_combo: 710,
+    },
+    shockChart,
+    { songLinked: true, chartLinked: true },
+  );
+  assert.deepEqual(overCombo.find((r) => r.code === "max_combo_exceeds_notes"), {
+    code: "max_combo_exceeds_notes",
+    detail: { max_combo: 710, max_notes: 709 },
+  });
 });
