@@ -15,6 +15,7 @@ import {
   expandMasterSong,
   judgeSumCheck,
   correctOkValue,
+  isDetailResult,
   normalizeTitle,
   computeReviewReasons,
   computeStats,
@@ -890,4 +891,28 @@ test("correctOkValue: repairs the O.K. trailing-digit misread only when proven",
   const small: any = { notes: 100, freeze: 8, shock: 0, level: 10, max_ex: 324 };
   const smallPlay: any = { marvelous: 90, perfect: 10, great: 0, good: 0, miss: 0, ok: 812, ex_score: (90 + 8) * 3 + 10 * 2, score: 990000, level: 10 };
   assert.deepEqual(correctOkValue(smallPlay, small), { ok: 8, corrected: true });
+});
+
+test("isDetailResult: consistent data overrides the tab; absence signature is the fallback", () => {
+  const full: any = { marvelous: 100, perfect: 20, great: 1, good: 0, miss: 0, ok: 5, ex_score: 500, max_combo: 121 };
+  const empty: any = { marvelous: null, perfect: null, great: null, good: null, miss: null, ok: null, ex_score: null, max_combo: null };
+  assert.equal(isDetailResult({ result_tab: "DETAIL" }, empty), true);
+  // `full` is complete but NOT self-consistent (EX should be 356, not 500),
+  // so the reported tab still decides.
+  assert.equal(isDetailResult({ result_tab: "GRAPH" }, full), false);
+  assert.equal(isDetailResult({ result_tab: "FLARE" }, full), false);
+  assert.equal(isDetailResult({ result_tab: "OTHER" }, full), false);
+  // A complete AND self-consistent read can only come from the detail tab:
+  // it overrides a misreported tab label.
+  const consistent: any = { marvelous: 100, perfect: 20, great: 1, good: 0, miss: 0, ok: 5, ex_score: 356, max_combo: 121 };
+  assert.equal(isDetailResult({ result_tab: "GRAPH" }, consistent, null), true);
+  assert.equal(isDetailResult({ result_tab: "GRAPH" }, consistent, { notes: 121, freeze: 5, shock: 0 }), true);
+  // ...unless the linked chart's judge-sum identity rejects the read.
+  assert.equal(isDetailResult({ result_tab: "GRAPH" }, consistent, { notes: 122, freeze: 5, shock: 0 }), false);
+  // No tab reported: full read -> detail; hollow read -> not detail.
+  assert.equal(isDetailResult({ result_tab: null }, full), true);
+  assert.equal(isDetailResult({}, empty), false);
+  // Partial read (EX + combo present, some judgments missing) still counts
+  // as a detail screen and goes through the normal review flow.
+  assert.equal(isDetailResult({}, { ...empty, ex_score: 500, max_combo: 121, marvelous: 100 }), true);
 });

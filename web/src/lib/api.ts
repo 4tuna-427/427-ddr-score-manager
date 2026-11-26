@@ -94,6 +94,16 @@ export interface AnalyzeResult {
   previous: PreviousScore | null
 }
 
+/** Returned (HTTP 200) when the photo shows a non-detail result tab and
+ *  nothing was registered. */
+export interface AnalyzeSkip {
+  skipped: true
+  reason: string
+  song_title: string | null
+}
+
+export type AnalyzeOutcome = AnalyzeResult | AnalyzeSkip
+
 export interface SongSearchItem {
   song_id: string
   title: string
@@ -126,14 +136,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
-export function analyzeImage(file: Blob, source: string, playedAtIso?: string, bulk?: boolean): Promise<AnalyzeResult> {
+export function analyzeImage(file: Blob, source: string, playedAtIso?: string, bulk?: boolean): Promise<AnalyzeOutcome> {
   const fd = new FormData()
   fd.append('file', file, 'result.webp')
   fd.append('source', source)
   if (playedAtIso) fd.append('played_at', playedAtIso)
   // Bulk import mode: the Worker reduces in-model retries for this call.
   if (bulk) fd.append('bulk', '1')
-  return request<AnalyzeResult>('/api/analyze', { method: 'POST', body: fd })
+  return request<AnalyzeOutcome>('/api/analyze', { method: 'POST', body: fd })
 }
 
 const jacketUrlCache = new Map<string, Promise<string | null>>()

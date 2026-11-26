@@ -6,7 +6,7 @@ import { diffLabel } from '../components/DiffBadge'
 import { getApiToken, getLatestDaySummary, type LatestDaySummary } from '../lib/api'
 
 export function HomePage() {
-  const { items, processing, lastResults, bulkMode, setBulkMode, enqueue, remove, processNow, clearResults } = useQueue()
+  const { items, processing, lastResults, lastSkips, bulkMode, setBulkMode, enqueue, remove, processNow, clearResults } = useQueue()
   const [params] = useSearchParams()
   const shared = params.get('shared') === '1'
   const fileRef = useRef<HTMLInputElement>(null)
@@ -126,6 +126,14 @@ export function HomePage() {
           </div>
         )
       })()}
+
+      {lastSkips.length > 0 && (
+        <div className="card">
+          <p>詳細リザルトではない画像 {lastSkips.length} 件をスキップしました（登録していません）。</p>
+          <p className="muted">{lastSkips.join('、')}</p>
+          <button type="button" onClick={clearResults}>閉じる</button>
+        </div>
+      )}
 
       {lastResults.length > 0 && (
         <div>

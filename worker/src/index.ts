@@ -5,6 +5,7 @@ import {
   choosePlayer,
   correctOkValue,
   evaluateScore,
+  isDetailResult,
   expandMaster,
   planSync,
   normalizeTitle,
@@ -431,6 +432,14 @@ app.post("/api/analyze", async (c) => {
   const playStyle = extraction.play_style ?? "SP";
   const difficulty = chosen.player.difficulty ?? "UNKNOWN";
   const { song, chart } = await findChartByTitle(c.env.DB, extraction.song_title, playStyle, difficulty);
+
+  // A photo of another result tab (play graph / flare) has no judgment
+  // data to register, and the detail tab is photographed separately:
+  // skip registration entirely instead of storing a hollow score.
+  if (!isDetailResult(extraction, chosen.player, chart)) {
+    return c.json({ skipped: true, reason: "not_detail_result", song_title: extraction.song_title }, 200);
+  }
+
   const fields = buildFields(extraction, chosen.player, song, chart, chosen.unresolved);
 
   let previous: { score: number; ex_score: number | null; diff: number; played_at: number } | null = null;

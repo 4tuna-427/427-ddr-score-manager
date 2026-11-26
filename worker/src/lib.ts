@@ -24,6 +24,8 @@ slow_count: number | null;
 export interface Extraction {
 song_title: string | null;
 play_style: string | null;
+/** Result-screen tab the photo shows: DETAIL (詳細リザルト) / GRAPH / FLARE / OTHER. */
+result_tab?: string | null;
 is_versus: boolean;
 player_1: PlayerExtraction | null;
 player_2: PlayerExtraction | null;
@@ -225,6 +227,40 @@ chart: ChartLike | null | undefined,
 if (!chart || chart.notes == null) return "no_master";
 const expected = expectedJudgeSum(p, chart) ?? chart.notes;
 return judgeSum(p) === expected? "match": "check";
+}
+
+/**
+ * Whether the photo shows the detailed result tab (詳細リザルト) — the
+ * only tab displaying the judgment breakdown, EX SCORE and MAX COMBO.
+ * Photos of other tabs (プレーグラフ / フレア) carry no judgment data to
+ * register (any numbers read there are graph values, not judgments), and
+ * the user photographs the detail tab separately, so such uploads are
+ * skipped rather than registered.
+ *
+ * Decision order:
+ * 1. A complete judgment read that is also internally consistent (EX
+ *    cross-check, plus the judge-sum identity when the chart is known)
+ *    can only have come from the detail tab — those numbers exist
+ *    nowhere else — so it overrides a possibly misreported tab label.
+ * 2. Otherwise a reported tab is trusted as-is.
+ * 3. With no tab reported, fall back to the absence signature: a read
+ *    with no EX score, no max combo and most tap judgments missing did
+ *    not come from a detail screen. A tab that merely failed to read
+ *    (null) therefore never blocks a genuine detail photo on its own.
+ */
+export function isDetailResult(
+ext: { result_tab?: string | null },
+p: PlayerExtraction,
+chart?: ChartLike | null,
+): boolean {
+const judgments = [p.marvelous, p.perfect, p.great, p.good, p.miss];
+const missing = judgments.filter((v) => v == null).length;
+const complete = missing === 0 && p.ok != null && p.ex_score != null && p.max_combo != null;
+if (complete && exCheck(p) === "match" && (chart == null || judgeSumCheck(p, chart) !== "check")) {
+  return true;
+}
+if (ext.result_tab != null) return ext.result_tab === "DETAIL";
+return !(p.ex_score == null && p.max_combo == null && missing >= 3);
 }
 
 /**

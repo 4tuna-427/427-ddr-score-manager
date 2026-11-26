@@ -9,6 +9,8 @@ interface QueueContextValue {
   items: QueueItem[]
   processing: boolean
   lastResults: AnalyzeResult[]
+  /** Labels (song title or file name) of uploads skipped as non-detail tabs. */
+  lastSkips: string[]
   bulkMode: boolean
   setBulkMode: (v: boolean) => void
   refresh: () => Promise<void>
@@ -58,6 +60,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<QueueItem[]>([])
   const [processing, setProcessing] = useState(false)
   const [lastResults, setLastResults] = useState<AnalyzeResult[]>([])
+  const [lastSkips, setLastSkips] = useState<string[]>([])
   const [bulkMode, setBulkModeState] = useState<boolean>(() => {
     try {
       return localStorage.getItem(BULK_MODE_KEY) === '1'
@@ -117,7 +120,12 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           const converted = await convertImage(next.blob)
           const result = await analyzeImage(converted, next.source || 'upload', captured.toISOString(), bulkMode)
           await deleteQueueItem(next.id)
-          setLastResults((prev) => [result, ...prev])
+          if ('skipped' in result) {
+            // Not a detail-result photo: nothing registered, not an error.
+            setLastSkips((prev) => [result.song_title ?? next.name, ...prev])
+          } else {
+            setLastResults((prev) => [result, ...prev])
+          }
         } catch (e) {
           if (e instanceof ApiError && e.status === 409) {
             // Same image already registered: park it, never auto-retry.
@@ -197,10 +205,13 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     [refresh],
   )
 
-  const clearResults = useCallback(() => setLastResults([]), [])
+  const clearResults = useCallback(() => {
+    setLastResults([])
+    setLastSkips([])
+  }, [])
 
   return (
-    <Ctx.Provider value={{ items, processing, lastResults, bulkMode, setBulkMode, refresh, enqueue, remove, processNow, clearResults }}>
+    <Ctx.Provider value={{ items, processing, lastResults, lastSkips, bulkMode, setBulkMode, refresh, enqueue, remove, processNow, clearResults }}>
       {children}
     </Ctx.Provider>
   )
