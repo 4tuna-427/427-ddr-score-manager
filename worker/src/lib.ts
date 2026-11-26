@@ -673,6 +673,12 @@ export interface StatPlay {
   played_at: number;
   ex_score?: number | null;
   flare_rank?: string | null;
+  marvelous?: number | null;
+  perfect?: number | null;
+  great?: number | null;
+  good?: number | null;
+  ok?: number | null;
+  miss?: number | null;
 }
 
 /** Flare rank strength (the hexagon badge on the result screen): I=1 .. IX=9, EX=10. */
@@ -741,6 +747,21 @@ export interface StatsResult {
       candidate_count: number;
     }[];
   };
+  /** Aggregates shaped for the Stats page graphs. */
+  graphs: {
+    /** Plays per level within each of the 12 monthly buckets (same months as `monthly`). */
+    level_monthly: { month: string; level: number; plays: number }[];
+    /** Judgment sums per JST play day (days without plays omitted, ascending). */
+    judge_daily: {
+      date: string; plays: number;
+      marvelous: number; perfect: number; great: number; good: number; ok: number; miss: number;
+    }[];
+    /** Chart coverage per play style x level x difficulty (difficulty parsed from chart_id). */
+    coverage: {
+      play_style: string; level: number; difficulty: string;
+      total: number; played: number; cleared: number;
+    }[];
+  };
 }
 
 const emptyBucket = (): AchievementBucket => ({
@@ -801,6 +822,11 @@ export function computeStats(
   const bestFlare = new Map<string, number>();
   const playDays = new Set<string>();
   const playsByDay = new Map<string, number>();
+  // Graph aggregates.
+  const chartLevel = new Map<string, number | null>();
+  for (const ch of masterCharts) chartLevel.set(ch.chart_id, ch.level);
+  const levelMonthCounts = new Map<string, number>(); // `${monthIdx}|${level}` -> plays
+  const judgeDaily = new Map<string, StatsResult["graphs"]["judge_daily"][number]>();
 
   for (const p of sorted) {
     const day = jstDateString(p.played_at);
@@ -808,7 +834,28 @@ export function computeStats(
     playsByDay.set(day, (playsByDay.get(day) ?? 0) + 1);
     const mi = monthIdx.get(day.slice(0, 7));
     if (mi !== undefined) months[mi].plays += 1;
+    if (p.marvelous != null || p.perfect != null || p.great != null || p.good != null || p.ok != null || p.miss != null) {
+      let jd = judgeDaily.get(day);
+      if (!jd) {
+        jd = { date: day, plays: 0, marvelous: 0, perfect: 0, great: 0, good: 0, ok: 0, miss: 0 };
+        judgeDaily.set(day, jd);
+      }
+      jd.plays += 1;
+      jd.marvelous += p.marvelous ?? 0;
+      jd.perfect += p.perfect ?? 0;
+      jd.great += p.great ?? 0;
+      jd.good += p.good ?? 0;
+      jd.ok += p.ok ?? 0;
+      jd.miss += p.miss ?? 0;
+    }
     if (!p.chart_id) continue;
+    if (mi !== undefined) {
+      const lv = chartLevel.get(p.chart_id);
+      if (lv != null) {
+        const key = `${mi}|${lv}`;
+        levelMonthCounts.set(key, (levelMonthCounts.get(key) ?? 0) + 1);
+      }
+    }
     const prevBest = bestScore.get(p.chart_id);
     if (prevBest !== undefined && p.score > prevBest && mi !== undefined) {
       months[mi].pb_updates += 1;
@@ -978,7 +1025,36 @@ export function computeStats(
     targets: flareTargets,
   };
 
-  return { totals, by_level, by_category, monthly: months, ex_rate_by_level, calendar, flare };
+  // Graphs: level x month rows (12 monthly buckets), judgment days, coverage.
+  const levelMonthly: StatsResult["graphs"]["level_monthly"] = [];
+  for (const [key, plays] of levelMonthCounts) {
+    const [mi, lv] = key.split("|");
+    levelMonthly.push({ month: months[Number(mi)].month, level: Number(lv), plays });
+  }
+  levelMonthly.sort((a, b) => a.month.localeCompare(b.month) || a.level - b.level);
+  const coverageMap = new Map<string, StatsResult["graphs"]["coverage"][number]>();
+  for (const ch of masterCharts) {
+    if (ch.level == null) continue;
+    const difficulty = ch.chart_id.split("|")[2] ?? "";
+    const key = `${ch.play_style}|${ch.level}|${difficulty}`;
+    let cell = coverageMap.get(key);
+    if (!cell) {
+      cell = { play_style: ch.play_style, level: ch.level, difficulty, total: 0, played: 0, cleared: 0 };
+      coverageMap.set(key, cell);
+    }
+    cell.total += 1;
+    if (bestScore.has(ch.chart_id)) cell.played += 1;
+    if ((bestLamp.get(ch.chart_id) ?? -1) >= LAMP_RANK.CLEAR) cell.cleared += 1;
+  }
+  const graphs: StatsResult["graphs"] = {
+    level_monthly: levelMonthly,
+    judge_daily: [...judgeDaily.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    coverage: [...coverageMap.values()].sort(
+      (a, b) => a.play_style.localeCompare(b.play_style) || b.level - a.level || a.difficulty.localeCompare(b.difficulty),
+    ),
+  };
+
+  return { totals, by_level, by_category, monthly: months, ex_rate_by_level, calendar, flare, graphs };
 }
 
 // ---- versus history ----

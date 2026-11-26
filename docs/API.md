@@ -96,6 +96,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 
 ### GET /api/stats
 → 統計・達成状況 `{totals, by_level, by_category, monthly, ex_rate_by_level, calendar, flare}`。
+- `graphs`: 統計ページのグラフ用集計。`level_monthly`（月別×レベルのプレイ数。月は `monthly` と同じ直近12か月のJST月）、`judge_daily`（JSTプレイ日ごとの判定合計と判定ありプレイ数。プレイの無い日は含まない）、`coverage`（スタイル×レベル×難易度ごとの {total, played, cleared}。cleared はクリアランプ CLEAR 以上を1回以上記録した譜面数、難易度は chart_id の第3要素から取得）。
 - `flare`: `{by_rank, charts_with_flare, targets}`。フレアスキルの合計値や称号ランクは扱わない（ユーザーの方針: アプリの目的は履歴の保存と成長の可視化）。
   - `by_rank`: 譜面ごとの「クリアした最高フレアランク」（I=1..IX=9, EX=10）の分布（強い順）。クリアランプがあるプレイのみ対象（FAILED のバッジ読み取りは数えない）。フレア無しクリアは含まない。
   - `targets`: 現在のフレア目標コンボ（`FLARE_TARGETS` = 16EX / 17EX / 17IX / 18IX）ごとの `{level, min_rank, achieved[], achieved_count, candidates[], candidate_count}`。達成 = そのレベルの譜面を目標以上のフレアランクでクリア済み（EXクリアはIX目標も満たす）。候補 = そのレベルをクリア済みだが目標ランク未満（現在の最高フレアランク付き、近い順）。一覧は achieved 最大50件・candidates 最大20件に切り詰め、件数は実数。

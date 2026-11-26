@@ -427,8 +427,8 @@ app.get("/api/stats", async (c) => {
     )
     .all<{ chart_id: string; play_style: string; level: number | null; max_ex: number | null; version: string | null; title: string | null }>();
   const { results: playRows } = await c.env.DB
-    .prepare("SELECT chart_id, score, ex_score, rank, clear_lamp, flare_rank, played_at FROM scores")
-    .all<{ chart_id: string | null; score: number; ex_score: number | null; rank: string | null; clear_lamp: string | null; played_at: number }>();
+    .prepare("SELECT chart_id, score, ex_score, rank, clear_lamp, flare_rank, played_at, marvelous, perfect, great, good, ok, miss FROM scores")
+    .all<{ chart_id: string | null; score: number; ex_score: number | null; rank: string | null; clear_lamp: string | null; played_at: number; marvelous: number | null; perfect: number | null; great: number | null; good: number | null; ok: number | null; miss: number | null }>();
   const master = masterRows.map((r) => ({
     chart_id: r.chart_id,
     play_style: r.play_style,

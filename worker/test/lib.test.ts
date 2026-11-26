@@ -635,3 +635,33 @@ test("computeStats: flare targets count cleared charts at/above the target rank"
     { flare_rank: "VIII", charts: 1 },
   ]);
 });
+
+test("computeStats: graphs aggregate level x month, judge days and coverage", () => {
+  const master: any[] = [
+    { chart_id: "a|SP|EXPERT", play_style: "SP", level: 17, max_ex: 3000, category: "GOLD", title: "A" },
+    { chart_id: "b|SP|EXPERT", play_style: "SP", level: 17, max_ex: 3000, category: "GOLD", title: "B" },
+    { chart_id: "c|SP|CHALLENGE", play_style: "SP", level: 18, max_ex: 3000, category: "GOLD", title: "C" },
+    { chart_id: "d|DP|EXPERT", play_style: "DP", level: 16, max_ex: 3000, category: "GOLD", title: "D" },
+  ];
+  const t0 = 1764000000000; // within the 12-month window of nowMs below
+  const plays: any[] = [
+    { chart_id: "a|SP|EXPERT", score: 900000, rank: "AA", clear_lamp: "CLEAR", flare_rank: null, played_at: t0, marvelous: 100, perfect: 50, great: 10, good: 0, ok: 5, miss: 2 },
+    { chart_id: "a|SP|EXPERT", score: 910000, rank: "AA", clear_lamp: "CLEAR", flare_rank: null, played_at: t0 + 3600000, marvelous: 120, perfect: 40, great: 5, good: 1, ok: 5, miss: 0 },
+    { chart_id: "b|SP|EXPERT", score: 500000, rank: "C", clear_lamp: "FAILED", flare_rank: null, played_at: t0 },
+    { chart_id: "c|SP|CHALLENGE", score: 950000, rank: "AAA", clear_lamp: "FC", flare_rank: null, played_at: t0 + 86400000, marvelous: 200, perfect: 30, great: 0, good: 0, ok: 8, miss: 0 },
+  ];
+  const s = computeStats(master, plays, t0 + 2 * 86400000);
+  const lm = s.graphs.level_monthly.filter((r) => r.plays > 0);
+  assert.equal(lm.find((r) => r.level === 17)?.plays, 3); // a x2 + b x1 in the same month
+  assert.equal(lm.find((r) => r.level === 18)?.plays, 1);
+  assert.equal(s.graphs.judge_daily.length, 2); // two distinct JST days
+  const d0 = s.graphs.judge_daily[0];
+  assert.equal(d0.marvelous, 220);
+  assert.equal(d0.perfect, 90);
+  assert.equal(d0.miss, 2);
+  const cov = (style: string, level: number, diff: string) =>
+    s.graphs.coverage.find((c) => c.play_style === style && c.level === level && c.difficulty === diff);
+  assert.deepEqual(cov("SP", 17, "EXPERT"), { play_style: "SP", level: 17, difficulty: "EXPERT", total: 2, played: 2, cleared: 1 });
+  assert.deepEqual(cov("SP", 18, "CHALLENGE"), { play_style: "SP", level: 18, difficulty: "CHALLENGE", total: 1, played: 1, cleared: 1 });
+  assert.deepEqual(cov("DP", 16, "EXPERT"), { play_style: "DP", level: 16, difficulty: "EXPERT", total: 1, played: 0, cleared: 0 });
+});

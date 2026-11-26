@@ -298,6 +298,17 @@ export interface StatsResponse {
   monthly: { month: string; plays: number; pb_updates: number; avg_ex_rate: number | null }[]
   ex_rate_by_level: { play_style: string; level: number; avg_ex_rate: number | null; charts: number }[]
   calendar: { date: string; plays: number }[]
+  graphs: {
+    level_monthly: { month: string; level: number; plays: number }[]
+    judge_daily: {
+      date: string; plays: number
+      marvelous: number; perfect: number; great: number; good: number; ok: number; miss: number
+    }[]
+    coverage: {
+      play_style: string; level: number; difficulty: string
+      total: number; played: number; cleared: number
+    }[]
+  }
   flare: {
     by_rank: { flare_rank: string; charts: number }[]
     charts_with_flare: number

@@ -4,6 +4,7 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { getCloseCalls, getStats, getTargets, getVersus, type AchievementBucket, type CloseCall, type StatsResponse, type Target, type VersusResponse } from '../lib/api'
 import { useIsDark } from '../lib/theme'
 import { DiffBadge } from '../components/DiffBadge'
+import { CoverageMap, JudgeTrendChart, LevelMonthlyChart } from '../components/StatGraphs'
 import { fmtDate } from '../components/ScoreList'
 
 const LAMP_ORDER: Record<string, number> = { FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6 }
@@ -262,6 +263,17 @@ export function StatsPage() {
       <section className="card">
         <h3>プレイカレンダー</h3>
         <CalendarHeatmap calendar={data.calendar} />
+      </section>
+
+      <section className="card">
+        <h3>グラフで見る</h3>
+        <h4>月別・レベル帯のプレイ数</h4>
+        <LevelMonthlyChart monthly={data.monthly} rows={data.graphs.level_monthly} />
+        <h4>判定の割合の推移（プレイ日ごと・直近24日分）</h4>
+        <JudgeTrendChart days={data.graphs.judge_daily} />
+        <p className="muted">判定割合は OK（フリーズ）を除く5判定での割合です。</p>
+        <h4>制覇マップ（レベル × 難易度）</h4>
+        <CoverageMap cells={data.graphs.coverage} />
       </section>
 
       <section className="card">
