@@ -35,6 +35,21 @@ notes: number | null;
 freeze?: number | null;
 shock: number | null;
 level?: number | null;
+max_ex?: number | null;
+}
+
+export type ReviewReasonCode =
+  | "unlinked_song"
+  | "difficulty_mismatch"
+  | "level_mismatch"
+  | "ex_mismatch"
+  | "ex_invalid"
+  | "judge_sum_mismatch"
+  | "player_unresolved";
+
+export interface ReviewReason {
+  code: ReviewReasonCode;
+  detail?: Record<string, number | string | null>;
 }
 
 export type ExCheck = "match" | "mismatch" | "no_ex";
@@ -198,28 +213,101 @@ export interface ScoreEvaluation {
 ex_check: ExCheck;
 judge_sum_check: JudgeSumCheck;
 needs_review: boolean;
+reasons: ReviewReason[];
+}
+
+export type ScoreCheckInput = Pick<
+  PlayerExtraction,
+  "marvelous" | "ok" | "perfect" | "great" | "good" | "miss" | "ex_score"
+> & {
+  score?: number | null;
+  level?: number | null;
+};
+
+/**
+ * Compute explicit review reasons for a score row against its linked song/chart.
+ */
+export function computeReviewReasons(
+  p: ScoreCheckInput,
+  chart: ChartLike | null | undefined,
+  opts: { songLinked: boolean; chartLinked: boolean; playerUnresolved?: boolean },
+): ReviewReason[] {
+  const reasons: ReviewReason[] = [];
+  if (!opts.songLinked && !opts.chartLinked) {
+    reasons.push({ code: "unlinked_song" });
+  } else if (opts.songLinked && !opts.chartLinked) {
+    reasons.push({ code: "difficulty_mismatch" });
+  }
+  if (opts.chartLinked && chart?.level != null && p.level != null && p.level !== chart.level) {
+    reasons.push({
+      code: "level_mismatch",
+      detail: { extracted_level: p.level, master_level: chart.level },
+    });
+  }
+  const ex = exCheck(p);
+  if (ex === "mismatch") {
+    const calc = calcEx(p);
+    reasons.push({
+      code: "ex_mismatch",
+      detail: {
+        ex_score: p.ex_score ?? null,
+        calc_ex: calc,
+        diff: p.ex_score != null && calc != null ? p.ex_score - calc : null,
+      },
+    });
+  }
+  if (chart?.max_ex != null && p.ex_score != null && p.ex_score > chart.max_ex) {
+    reasons.push({
+      code: "ex_invalid",
+      detail: { reason: "exceeds_max_ex", ex_score: p.ex_score, max_ex: chart.max_ex },
+    });
+  } else if (p.ex_score != null && p.ex_score < 0) {
+    reasons.push({
+      code: "ex_invalid",
+      detail: { reason: "negative", ex_score: p.ex_score },
+    });
+  } else if (p.score != null && p.score > 0 && (p.ex_score == null || p.ex_score === 0)) {
+    reasons.push({
+      code: "ex_invalid",
+      detail: { reason: "missing_or_zero", score: p.score },
+    });
+  }
+  const jsum = judgeSumCheck(p, chart);
+  if (jsum === "check") {
+    reasons.push({
+      code: "judge_sum_mismatch",
+      detail: {
+        judge_sum: judgeSum(p),
+        expected: (chart?.notes ?? 0) + (chart?.shock ?? 0),
+      },
+    });
+  }
+  if (opts.playerUnresolved) {
+    reasons.push({ code: "player_unresolved" });
+  }
+  return reasons;
 }
 
 /**
-* Combined review decision used by analyze / PATCH / select-player / link.
-* needs_review when: no chart linked, the player could not be resolved,
-* the EX cross-check mismatches, or the judge sum disagrees with the master.
-* A 'no_master' judge check alone does not force review, because masters
-* synced from the v1 format carry no notecounts at all.
-*/
+ * Combined review decision used by analyze / PATCH / select-player / link.
+ * needs_review when any review reason is present.
+ * A 'no_master' judge check alone does not force review, because masters
+ * synced from the v1 format carry no notecounts at all.
+ */
 export function evaluateScore(
-p: Pick<PlayerExtraction, "marvelous" | "ok" | "perfect" | "great" | "good" | "miss" | "ex_score">,
-chart: ChartLike | null | undefined,
-opts: { chartLinked: boolean; playerUnresolved?: boolean},
+  p: ScoreCheckInput,
+  chart: ChartLike | null | undefined,
+  opts: { chartLinked: boolean; songLinked?: boolean; playerUnresolved?: boolean },
 ): ScoreEvaluation {
-const ex_check = exCheck(p);
-const judge_sum_check = judgeSumCheck(p, chart);
-const needs_review =
-!opts.chartLinked ||
-!!opts.playerUnresolved ||
-ex_check === "mismatch" ||
-judge_sum_check === "check";
-return { ex_check, judge_sum_check, needs_review};
+  const ex_check = exCheck(p);
+  const judge_sum_check = judgeSumCheck(p, chart);
+  const reasons = computeReviewReasons(p, chart, {
+    songLinked: opts.songLinked ?? opts.chartLinked,
+    chartLinked: opts.chartLinked,
+    playerUnresolved: opts.playerUnresolved,
+  });
+  const needs_review = reasons.length > 0;
+  return { ex_check, judge_sum_check, needs_review, reasons };
 }
 
 function normalizeDancerName(name: string | null | undefined): string {

@@ -1,0 +1,2 @@
+ALTER TABLE scores ADD COLUMN review_status TEXT;
+ALTER TABLE scores ADD COLUMN has_review_image INTEGER NOT NULL DEFAULT 0;

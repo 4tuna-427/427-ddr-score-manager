@@ -15,6 +15,18 @@ export function setApiBaseUrl(v: string): void {
   localStorage.setItem(BASE_KEY, v.replace(/\/$/, ''))
 }
 
+export interface ReviewReason {
+  code:
+    | 'unlinked_song'
+    | 'difficulty_mismatch'
+    | 'level_mismatch'
+    | 'ex_mismatch'
+    | 'ex_invalid'
+    | 'judge_sum_mismatch'
+    | 'player_unresolved'
+  detail?: Record<string, number | string | null>
+}
+
 export interface Score {
   id: string
   chart_id: string | null
@@ -40,15 +52,23 @@ export interface Score {
   ex_check: string | null
   judge_sum_check: string | null
   needs_review: number
+  review_status?: string | null
+  has_review_image?: number
+  review_reasons?: ReviewReason[]
   source: string
   raw_extraction: string | null
   played_at: number
   created_at: number
   song_title?: string | null
   artist?: string | null
+  chart_level?: number | null
+  chart_notes?: number | null
+  chart_shock?: number | null
   chart_max_ex?: number | null
   /** Ranked link candidates for unlinked records (attached by the API). */
   candidates?: LinkCandidate[]
+  /** Charts belonging to the matched song (when song_id matched but chart_id did not). */
+  song_charts?: { chart_id: string; play_style: string; difficulty: string; level: number | null }[]
 }
 
 export interface LinkCandidate {
@@ -193,6 +213,44 @@ export function relinkScores(): Promise<{ checked: number; linked: number; remai
 
 export function searchSongs(q: string): Promise<{ items: SongSearchItem[] }> {
   return request(`/api/songs?q=${encodeURIComponent(q)}`)
+}
+
+export async function fetchReviewImageObjectUrl(scoreId: string): Promise<string | null> {
+  try {
+    const base = getApiBaseUrl()
+    const headers = new Headers()
+    const token = getApiToken()
+    if (token) headers.set('X-API-Token', token)
+    const res = await fetch(`${base}/api/scores/${encodeURIComponent(scoreId)}/image`, { headers })
+    if (!res.ok) return null
+    return URL.createObjectURL(await res.blob())
+  } catch {
+    return null
+  }
+}
+
+export interface CustomSongPayload {
+  title: string
+  artist?: string
+  play_style: 'SP' | 'DP'
+  difficulty: string
+  level?: number | null
+  notes?: number | null
+  freeze?: number | null
+  shock?: number | null
+  score_id?: string
+}
+
+export function createCustomSong(payload: CustomSongPayload): Promise<{
+  song: { song_id: string; title: string }
+  chart: { chart_id: string; play_style: string; difficulty: string; level: number | null }
+  score: Score | null
+}> {
+  return request('/api/songs/custom', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
 }
 
 export interface ChartHistory {

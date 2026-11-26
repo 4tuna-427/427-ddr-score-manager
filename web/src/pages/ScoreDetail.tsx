@@ -7,6 +7,8 @@ import {
 import { fmtDate } from '../components/ScoreList'
 import { diffLabel } from '../components/DiffBadge'
 import { JudgeBar } from '../components/JudgeBar'
+import { ReviewImage } from '../components/ReviewImage'
+import { ReviewReasonBadges } from '../components/ReviewReasonBadges'
 import { exRatePercent } from '../lib/stats'
 
 const NUM_FIELDS: { key: keyof Score; label: string }[] = [
@@ -39,6 +41,7 @@ export function ScoreDetailPage() {
   const [editValue, setEditValue] = useState('')
   const [query, setQuery] = useState('')
   const [songs, setSongs] = useState<SongSearchItem[]>([])
+  const [showRelink, setShowRelink] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(() => {
@@ -107,6 +110,7 @@ export function ScoreDetailPage() {
     try {
       const r = await linkChart(id, chartId)
       setScore(r.score)
+      setShowRelink(false)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -142,7 +146,15 @@ export function ScoreDetailPage() {
       <p className="muted">
         {score.artist || ''} / {diffLabel(score.play_style, score.difficulty, score.level)} / {fmtDate(score.played_at)}
       </p>
-      {score.needs_review === 1 && <p className="warn">⚠ 要確認（EX検算: {score.ex_check || '-'}、判定合計: {score.judge_sum_check || '-'}）</p>}
+      {score.needs_review === 1 && (
+        <div className="card">
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+            <strong>⚠ 要確認</strong>
+            <ReviewImage scoreId={score.id} hasImage={score.has_review_image} />
+          </div>
+          <ReviewReasonBadges reasons={score.review_reasons} reviewStatus={score.review_status} />
+        </div>
+      )}
 
       <div className="card">
         {NUM_FIELDS.map((f) => renderField(f.key, f.label, score[f.key], true))}
@@ -170,9 +182,26 @@ export function ScoreDetailPage() {
         </div>
       )}
 
-      {!score.chart_id && (
+      {(!score.chart_id || showRelink) && (
         <div className="card">
-          <h2>曲を紐付ける</h2>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h2>{score.chart_id ? '曲・譜面を変更する' : '曲を紐付ける'}</h2>
+            {score.chart_id && (
+              <button type="button" onClick={() => setShowRelink(false)}>閉じる</button>
+            )}
+          </div>
+          {(score.song_charts ?? []).length > 0 && (
+            <>
+              <p className="muted">一致した曲の譜面から選択：</p>
+              <div className="review-actions" style={{ marginBottom: 8 }}>
+                {(score.song_charts ?? []).map((ch) => (
+                  <button key={ch.chart_id} type="button" disabled={busy} onClick={() => onLink(ch.chart_id)}>
+                    {diffLabel(ch.play_style, ch.difficulty, ch.level)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {(score.candidates ?? []).length > 0 && (
             <>
               <p className="muted">読み取り曲名に近い候補：</p>
@@ -209,9 +238,20 @@ export function ScoreDetailPage() {
       )}
 
       {score.chart_id && (
-        <p>
+        <div className="row wrap" style={{ justifyContent: 'space-between', margin: '10px 0' }}>
           <Link to={`/charts/${encodeURIComponent(score.chart_id)}`}>この譜面のスコア遷移グラフを見る</Link>
-        </p>
+          {!showRelink && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!query) setQuery(score.raw_title || score.song_title || '')
+                setShowRelink(true)
+              }}
+            >
+              別の曲・譜面に変更
+            </button>
+          )}
+        </div>
       )}
 
       <div className="card">

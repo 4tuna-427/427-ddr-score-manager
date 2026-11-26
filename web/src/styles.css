@@ -255,3 +255,88 @@ button.danger { color: #c2272f; border-color: #c2272f; }
 .flare-target { padding: 10px 0; border-top: 1px solid var(--line); }
 .flare-target:first-of-type { border-top: 0; }
 .flare-target-count { margin: 0 8px; }
+
+/* Review screen enhancements */
+.review-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.review-header h1 { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.review-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin: 10px 0 6px; }
+.review-tab {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 7px 12px; min-height: 38px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; background: var(--surface);
+}
+.review-tab.active { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+.review-tab-count {
+  background: rgba(16, 22, 19, 0.1); border-radius: 999px; padding: 1px 7px; font-size: 11px;
+}
+[data-theme="dark"] .review-tab-count { background: rgba(255, 255, 255, 0.14); }
+
+.review-card { padding: 14px; }
+.review-card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.review-card-title-block { min-width: 0; flex: 1; }
+.review-card-title { font-weight: 800; font-size: 16px; color: var(--ink); text-decoration: none; display: inline-block; word-break: break-word; }
+.review-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.review-card-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.review-card-score { font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums; }
+
+.review-reasons { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.reason-item {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px;
+  padding: 8px 10px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-ink); font-size: 13px;
+}
+.reason-item.reason-waiting { background: var(--notice-bg); color: var(--notice-ink); }
+.reason-pill {
+  font-size: 11px; font-weight: 800; border-radius: 6px; padding: 2px 7px; color: #fff; white-space: nowrap;
+}
+.reason-pill.song { background: #d97706; }
+.reason-pill.score { background: #dc2626; }
+.reason-pill.player { background: #2563eb; }
+.reason-pill.waiting { background: #0b7a43; }
+.reason-detail { flex: 1; min-width: 180px; line-height: 1.4; }
+
+.review-quick-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.review-quick-bar button { font-size: 13px; padding: 7px 11px; min-height: 38px; }
+.review-subblock { width: 100%; margin-top: 2px; }
+
+.review-panel {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+.review-edit-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+}
+.review-edit-grid label {
+  display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; color: var(--muted);
+}
+.review-edit-grid input, .review-edit-grid select {
+  width: 100%; min-height: 38px; padding: 6px 8px; font-size: 15px;
+}
+
+.review-card-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+.danger-link {
+  border: none; background: transparent; color: #c2272f;
+  padding: 4px 8px; min-height: 32px; font-size: 13px; font-weight: 700;
+}
+
+/* Review image thumbnail & lightbox modal */
+.review-img-thumb-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
+  min-height: 34px; border-radius: 8px; font-size: 12px; background: var(--surface-active);
+}
+.review-img-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; }
+.review-img-modal {
+  position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, 0.84);
+  display: flex; align-items: center; justify-content: center; padding: 12px;
+}
+.review-img-modal-inner {
+  width: 100%; max-width: 720px; max-height: 92vh; background: var(--surface);
+  border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;
+}
+.review-img-modal-bar {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--line);
+}
+.review-img-scroll { overflow: auto; max-height: calc(92vh - 64px); touch-action: pinch-zoom; text-align: center; background: #000; }
+.review-img-full { max-width: 100%; height: auto; display: block; margin: 0 auto; }

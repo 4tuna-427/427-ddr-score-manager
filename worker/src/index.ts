@@ -18,6 +18,7 @@ import {
   LAMP_RANK,
   computeCloseCalls,
   computeVersus,
+  computeReviewReasons,
   findPhashCandidates,
   isValidPhash64,
   songCategory,
@@ -83,6 +84,27 @@ function genId(): string {
 }
 
 const D1_IN_CHUNK = 90;
+const REVIEW_IMG_PREFIX = "review_img:";
+const REVIEW_IMG_TTL_SEC = 30 * 86400;
+
+async function saveReviewImage(
+  env: Env,
+  scoreId: string,
+  bytes: ArrayBuffer,
+  contentType: string,
+): Promise<boolean> {
+  if (!env.JACKETS) return false;
+  await env.JACKETS.put(`${REVIEW_IMG_PREFIX}${scoreId}`, bytes, {
+    expirationTtl: REVIEW_IMG_TTL_SEC,
+    metadata: { content_type: contentType || "image/webp" },
+  });
+  return true;
+}
+
+async function deleteReviewImage(env: Env, scoreId: string): Promise<void> {
+  if (!env.JACKETS) return;
+  await env.JACKETS.delete(`${REVIEW_IMG_PREFIX}${scoreId}`).catch(() => {});
+}
 
 function chunkArray<T>(arr: T[], size = D1_IN_CHUNK): T[][] {
   const out: T[][] = [];
@@ -205,6 +227,65 @@ async function attachCandidates<T extends Record<string, any>>(db: D1Database, r
   return rows;
 }
 
+function isPlayerUnresolved(row: Record<string, any>, myDancerName?: string): boolean {
+  if (!row.raw_extraction) return false;
+  try {
+    const ext = JSON.parse(String(row.raw_extraction)) as Extraction & { _selected_player?: number };
+    if (ext._selected_player) return false;
+    const chosen = choosePlayer(ext, myDancerName);
+    return !!chosen?.unresolved;
+  } catch {
+    return false;
+  }
+}
+
+async function attachReviewDetails<T extends Record<string, any>>(
+  db: D1Database,
+  rows: T[],
+  myDancerName?: string,
+): Promise<T[]> {
+  await attachCandidates(db, rows);
+
+  // For rows where song matched but chart didn't (difficulty mismatch), attach available charts of that song.
+  const songOnlyIds = [...new Set(
+    rows.filter((r) => r.song_id && !r.chart_id).map((r) => String(r.song_id)),
+  )];
+  const chartsBySong = new Map<string, { chart_id: string; play_style: string; difficulty: string; level: number | null }[]>();
+  for (const chunk of chunkArray(songOnlyIds)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const { results: songCharts } = await db
+      .prepare(`SELECT chart_id, song_id, play_style, difficulty, level FROM charts WHERE song_id IN (${placeholders}) ORDER BY play_style, difficulty`)
+      .bind(...chunk)
+      .all<{ chart_id: string; song_id: string; play_style: string; difficulty: string; level: number | null }>();
+    for (const ch of songCharts) {
+      const list = chartsBySong.get(ch.song_id) ?? [];
+      list.push({ chart_id: ch.chart_id, play_style: ch.play_style, difficulty: ch.difficulty, level: ch.level });
+      chartsBySong.set(ch.song_id, list);
+    }
+  }
+
+  for (const r of rows) {
+    if (r.song_id && !r.chart_id) {
+      (r as Record<string, unknown>).song_charts = chartsBySong.get(String(r.song_id)) ?? [];
+    }
+    const chartLike = r.chart_id
+      ? {
+          notes: r.chart_notes ?? null,
+          shock: r.chart_shock ?? null,
+          level: r.chart_level ?? null,
+          max_ex: r.chart_max_ex ?? null,
+        }
+      : null;
+    const playerUnresolved = r.needs_review === 1 ? isPlayerUnresolved(r, myDancerName) : false;
+    (r as Record<string, unknown>).review_reasons = computeReviewReasons(r as any, chartLike, {
+      songLinked: !!r.song_id,
+      chartLinked: !!r.chart_id,
+      playerUnresolved,
+    });
+  }
+  return rows;
+}
+
 function buildFields(
   ext: Extraction,
   player: PlayerExtraction,
@@ -214,6 +295,7 @@ function buildFields(
 ): ScoreFields {
   const playStyle = ext.play_style ?? "SP";
   const ev = evaluateScore(player, chart, {
+    songLinked: !!song,
     chartLinked: !!chart,
     playerUnresolved,
   });
@@ -259,7 +341,9 @@ function fieldsToValues(f: ScoreFields): unknown[] {
 async function getScore(db: D1Database, id: string): Promise<Record<string, unknown> | null> {
   const row = await db
     .prepare(
-      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist,
+              charts.level AS chart_level, charts.notes AS chart_notes,
+              charts.shock AS chart_shock, charts.max_ex AS chart_max_ex
        FROM scores s
        LEFT JOIN songs ON songs.song_id = s.song_id
        LEFT JOIN charts ON charts.chart_id = s.chart_id
@@ -279,8 +363,13 @@ async function getChart(db: D1Database, id: string): Promise<ChartDbRow | null> 
 function recomputeChecks(
   row: Record<string, any>,
   chart: ChartDbRow | null,
+  opts?: { playerUnresolved?: boolean },
 ): { ex_check: string; judge_sum_check: string; needs_review: number } {
-  const ev = evaluateScore(row as PlayerExtraction, chart, { chartLinked: !!chart });
+  const ev = evaluateScore(row as any, chart, {
+    songLinked: !!row.song_id,
+    chartLinked: !!chart,
+    playerUnresolved: opts?.playerUnresolved,
+  });
   return { ex_check: ev.ex_check, judge_sum_check: ev.judge_sum_check, needs_review: ev.needs_review ? 1 : 0 };
 }
 
@@ -358,13 +447,18 @@ app.post("/api/analyze", async (c) => {
   // played_at: prefer the photo's capture time sent by the client (EXIF),
   // validated by parsePlayedAt; fall back to upload time.
   const playedAt = parsePlayedAt(form.get("played_at"), now) ?? now;
-  const cols = ["id", ...SCORE_COLUMNS, "image_hash", "source", "raw_extraction", "played_at", "created_at"];
+  const contentType = (file as File).type || "image/webp";
+  const hasReviewImage = fields.needs_review === 1
+    ? (await saveReviewImage(c.env, id, imageBytes, contentType) ? 1 : 0)
+    : 0;
+  const cols = ["id", ...SCORE_COLUMNS, "image_hash", "source", "raw_extraction", "has_review_image", "played_at", "created_at"];
   await c.env.DB
     .prepare(`INSERT INTO scores (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
-    .bind(id, ...fieldsToValues(fields), imageHash, source, JSON.stringify(extraction), playedAt, now)
+    .bind(id, ...fieldsToValues(fields), imageHash, source, JSON.stringify(extraction), hasReviewImage, playedAt, now)
     .run();
 
   const score = await getScore(c.env.DB, id);
+  if (score) await attachReviewDetails(c.env.DB, [score as Record<string, any>], c.env.MY_DANCER_NAME);
   return c.json({ score, previous }, 201);
 });
 
@@ -683,14 +777,16 @@ app.get("/api/scores", async (c) => {
     .first<{ n: number }>();
   const { results } = await c.env.DB
     .prepare(
-      `SELECT s.*, songs.title AS song_title, songs.artist AS artist, charts.max_ex AS chart_max_ex
+      `SELECT s.*, songs.title AS song_title, songs.artist AS artist,
+              charts.level AS chart_level, charts.notes AS chart_notes,
+              charts.shock AS chart_shock, charts.max_ex AS chart_max_ex
        FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
        LEFT JOIN charts ON charts.chart_id = s.chart_id
        ${where} ORDER BY s.played_at DESC LIMIT ? OFFSET ?`,
     )
     .bind(...binds, limit, offset)
     .all();
-  await attachCandidates(c.env.DB, results as Record<string, any>[]);
+  await attachReviewDetails(c.env.DB, results as Record<string, any>[], c.env.MY_DANCER_NAME);
   return c.json({ items: results, total: totalRow?.n ?? 0 });
 });
 
@@ -698,8 +794,23 @@ app.get("/api/scores", async (c) => {
 app.get("/api/scores/:id", async (c) => {
   const score = await getScore(c.env.DB, c.req.param("id"));
   if (!score) return c.json({ error: "not found" }, 404);
-  await attachCandidates(c.env.DB, [score as Record<string, any>]);
+  await attachReviewDetails(c.env.DB, [score as Record<string, any>], c.env.MY_DANCER_NAME);
   return c.json({ score });
+});
+
+// ---- GET /api/scores/:id/image (temporary review image from KV) ----
+app.get("/api/scores/:id/image", async (c) => {
+  const kv = c.env.JACKETS;
+  if (!kv) return c.json({ error: "review image storage is not configured" }, 404);
+  const id = c.req.param("id");
+  const got = await kv.getWithMetadata<{ content_type?: string }>(`${REVIEW_IMG_PREFIX}${id}`, "arrayBuffer");
+  if (!got.value) return c.json({ error: "review image not found" }, 404);
+  return new Response(got.value, {
+    headers: {
+      "Content-Type": got.metadata?.content_type ?? "image/webp",
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
 });
 
 // ---- DELETE /api/scores/:id (remove a bogus/unlinkable record) ----
@@ -708,6 +819,7 @@ app.delete("/api/scores/:id", async (c) => {
   const row = await getScore(c.env.DB, id);
   if (!row) return c.json({ error: "not found" }, 404);
   await c.env.DB.prepare("DELETE FROM scores WHERE id = ?").bind(id).run();
+  await deleteReviewImage(c.env, id);
   return c.json({ ok: true });
 });
 
@@ -715,7 +827,7 @@ app.delete("/api/scores/:id", async (c) => {
 const PATCHABLE = [
   "score", "ex_score", "marvelous", "perfect", "great", "good", "ok", "miss",
   "rank", "clear_lamp", "flare_rank", "max_combo", "fast_count", "slow_count",
-  "difficulty", "level",
+  "difficulty", "level", "review_status",
 ] as const;
 
 app.patch("/api/scores/:id", async (c) => {
@@ -723,6 +835,9 @@ app.patch("/api/scores/:id", async (c) => {
   const row = await getScore(c.env.DB, id);
   if (!row) return c.json({ error: "not found" }, 404);
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if ("review_status" in body && body.review_status !== null && body.review_status !== "waiting_master") {
+    return c.json({ error: "review_status must be null or 'waiting_master'" }, 400);
+  }
   const merged: Record<string, any> = { ...row };
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -733,15 +848,35 @@ app.patch("/api/scores/:id", async (c) => {
       values.push(body[key] ?? null);
     }
   }
+  if (sets.length === 0) {
+    await attachReviewDetails(c.env.DB, [row as Record<string, any>], c.env.MY_DANCER_NAME);
+    return c.json({ score: row });
+  }
   const chart = merged.chart_id ? await getChart(c.env.DB, String(merged.chart_id)) : null;
-  const checks = recomputeChecks(merged, chart);
+  const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, c.env.MY_DANCER_NAME) : false;
+  const checks = recomputeChecks(merged, chart, { playerUnresolved });
   sets.push("ex_check = ?", "judge_sum_check = ?", "needs_review = ?");
   values.push(checks.ex_check, checks.judge_sum_check, checks.needs_review);
+  if (checks.needs_review === 0) {
+    if (!("review_status" in body)) {
+      sets.push("review_status = NULL");
+    } else {
+      // Force clear review_status if review is resolved.
+      const idx = sets.indexOf("review_status = ?");
+      if (idx !== -1) values[idx] = null;
+    }
+    sets.push("has_review_image = 0");
+  }
   await c.env.DB
     .prepare(`UPDATE scores SET ${sets.join(", ")} WHERE id = ?`)
     .bind(...values, id)
     .run();
-  return c.json({ score: await getScore(c.env.DB, id) });
+  if (checks.needs_review === 0) {
+    await deleteReviewImage(c.env, id);
+  }
+  const updated = await getScore(c.env.DB, id);
+  if (updated) await attachReviewDetails(c.env.DB, [updated as Record<string, any>], c.env.MY_DANCER_NAME);
+  return c.json({ score: updated });
 });
 
 // ---- POST /api/scores/:id/select-player ----
@@ -754,7 +889,7 @@ app.post("/api/scores/:id/select-player", async (c) => {
     return c.json({ error: "player must be 1 or 2" }, 400);
   }
   if (!row.raw_extraction) return c.json({ error: "no raw_extraction stored" }, 400);
-  const extraction = JSON.parse(String(row.raw_extraction)) as Extraction;
+  const extraction = JSON.parse(String(row.raw_extraction)) as Extraction & { _selected_player?: number };
   const player = body.player === 1 ? extraction.player_1 : extraction.player_2;
   if (!player) return c.json({ error: "that player is not in the extraction" }, 400);
 
@@ -762,12 +897,22 @@ app.post("/api/scores/:id/select-player", async (c) => {
   const difficulty = player.difficulty ?? "UNKNOWN";
   const { song, chart } = await findChartByTitle(c.env.DB, extraction.song_title, playStyle, difficulty);
   const fields = buildFields(extraction, player, song, chart, false);
-  const sets = SCORE_COLUMNS.map((col) => `${col} = ?`).join(", ");
+  const nextRaw = JSON.stringify({ ...extraction, _selected_player: body.player });
+  const sets = [
+    ...SCORE_COLUMNS.map((col) => `${col} = ?`),
+    "raw_extraction = ?",
+    ...(fields.needs_review === 0 ? ["review_status = NULL", "has_review_image = 0"] : []),
+  ].join(", ");
   await c.env.DB
     .prepare(`UPDATE scores SET ${sets} WHERE id = ?`)
-    .bind(...fieldsToValues(fields), id)
+    .bind(...fieldsToValues(fields), nextRaw, id)
     .run();
-  return c.json({ score: await getScore(c.env.DB, id) });
+  if (fields.needs_review === 0) {
+    await deleteReviewImage(c.env, id);
+  }
+  const updated = await getScore(c.env.DB, id);
+  if (updated) await attachReviewDetails(c.env.DB, [updated as Record<string, any>], c.env.MY_DANCER_NAME);
+  return c.json({ score: updated });
 });
 
 // ---- POST /api/scores/:id/link ----
@@ -788,15 +933,23 @@ app.post("/api/scores/:id/link", async (c) => {
     difficulty: chart.difficulty,
     level: chart.level,
   };
-  const checks = recomputeChecks(merged, chart);
+  const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, c.env.MY_DANCER_NAME) : false;
+  const checks = recomputeChecks(merged, chart, { playerUnresolved });
   await c.env.DB
     .prepare(
-      "UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?, ex_check = ?, judge_sum_check = ?, needs_review = ? WHERE id = ?",
+      `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
+       ex_check = ?, judge_sum_check = ?, needs_review = ?,
+       review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
     )
     .bind(chart.chart_id, chart.song_id, chart.play_style, chart.difficulty, chart.level,
       checks.ex_check, checks.judge_sum_check, checks.needs_review, id)
     .run();
-  return c.json({ score: await getScore(c.env.DB, id) });
+  if (checks.needs_review === 0) {
+    await deleteReviewImage(c.env, id);
+  }
+  const updated = await getScore(c.env.DB, id);
+  if (updated) await attachReviewDetails(c.env.DB, [updated as Record<string, any>], c.env.MY_DANCER_NAME);
+  return c.json({ score: updated });
 });
 
 // ---- GET /api/targets / POST /api/targets / DELETE /api/targets/:chart_id ----
@@ -967,6 +1120,123 @@ app.get("/api/songs", async (c) => {
     items.push({ song_id: song.song_id, title: song.title, artist: song.artist, charts });
   }
   return c.json({ items });
+});
+
+// ---- POST /api/songs/custom (register provisional song + chart and optionally link score) ----
+const VALID_DIFFS = ["BEGINNER", "BASIC", "DIFFICULT", "EXPERT", "CHALLENGE"] as const;
+
+app.post("/api/songs/custom", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: unknown;
+    artist?: unknown;
+    play_style?: unknown;
+    difficulty?: unknown;
+    level?: unknown;
+    notes?: unknown;
+    freeze?: unknown;
+    shock?: unknown;
+    score_id?: unknown;
+  };
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  if (!title) return c.json({ error: "title is required" }, 400);
+  const titleNorm = normalizeTitle(title);
+  if (!titleNorm) return c.json({ error: "title contains no valid characters" }, 400);
+  if (body.play_style !== "SP" && body.play_style !== "DP") {
+    return c.json({ error: "play_style must be SP or DP" }, 400);
+  }
+  if (typeof body.difficulty !== "string" || !(VALID_DIFFS as readonly string[]).includes(body.difficulty)) {
+    return c.json({ error: `difficulty must be one of ${VALID_DIFFS.join(", ")}` }, 400);
+  }
+  const optInt = (v: unknown) => (v == null || v === "" ? null : isInt(v) ? v : NaN);
+  const level = optInt(body.level);
+  const notes = optInt(body.notes);
+  const freeze = optInt(body.freeze);
+  const shock = optInt(body.shock);
+  if ([level, notes, freeze, shock].some((x) => Number.isNaN(x))) {
+    return c.json({ error: "level, notes, freeze, shock must be integers or null" }, 400);
+  }
+
+  const songId = `custom_${genId()}`;
+  const chartId = makeChartId(songId, body.play_style, body.difficulty);
+  const artist = typeof body.artist === "string" && body.artist.trim() ? body.artist.trim() : null;
+  const maxEx = notes != null && freeze != null ? (notes + freeze + (shock ?? 0)) * 3 : null;
+  const now = Date.now();
+
+  await c.env.DB.batch([
+    c.env.DB
+      .prepare(
+        `INSERT INTO songs (song_id, title, title_normalized, artist, availability, updated_at)
+         VALUES (?, ?, ?, ?, 'custom', ?)`,
+      )
+      .bind(songId, title, titleNorm, artist, now),
+    c.env.DB
+      .prepare(
+        `INSERT INTO charts (chart_id, song_id, play_style, difficulty, level, notes, freeze, shock, max_ex)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(chartId, songId, body.play_style, body.difficulty, level, notes, freeze, shock, maxEx),
+  ]);
+
+  let updatedScore: Record<string, unknown> | null = null;
+  if (typeof body.score_id === "string" && body.score_id) {
+    const scoreId = body.score_id;
+    const row = await getScore(c.env.DB, scoreId);
+    if (row) {
+      const chart: ChartDbRow = {
+        chart_id: chartId,
+        song_id: songId,
+        play_style: body.play_style,
+        difficulty: body.difficulty,
+        level,
+        notes,
+        freeze,
+        shock,
+        max_ex: maxEx,
+      };
+      const merged: Record<string, any> = {
+        ...row,
+        chart_id: chartId,
+        song_id: songId,
+        play_style: body.play_style,
+        difficulty: body.difficulty,
+        level: level ?? row.level,
+      };
+      const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, c.env.MY_DANCER_NAME) : false;
+      const checks = recomputeChecks(merged, chart, { playerUnresolved });
+      await c.env.DB
+        .prepare(
+          `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
+           ex_check = ?, judge_sum_check = ?, needs_review = ?,
+           review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
+        )
+        .bind(
+          chartId,
+          songId,
+          body.play_style,
+          body.difficulty,
+          merged.level,
+          checks.ex_check,
+          checks.judge_sum_check,
+          checks.needs_review,
+          scoreId,
+        )
+        .run();
+      if (checks.needs_review === 0) {
+        await deleteReviewImage(c.env, scoreId);
+      }
+      updatedScore = await getScore(c.env.DB, scoreId);
+      if (updatedScore) await attachReviewDetails(c.env.DB, [updatedScore as Record<string, any>], c.env.MY_DANCER_NAME);
+    }
+  }
+
+  return c.json(
+    {
+      song: { song_id: songId, title, artist },
+      chart: { chart_id: chartId, play_style: body.play_style, difficulty: body.difficulty, level },
+      score: updatedScore,
+    },
+    201,
+  );
 });
 
 // ---- GET /api/jackets/:song_id (authenticated image delivery from KV) ----
@@ -1204,15 +1474,16 @@ async function syncMaster(
   return { songs: songs.length, charts: charts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length };
 }
 
-// ---- POST /api/admin/relink: re-run title matching for unlinked scores ----
-app.post("/api/admin/relink", async (c) => {
-  const { results: rows } = await c.env.DB
+async function relinkUnlinkedScores(
+  env: Env,
+): Promise<{ checked: number; linked: number; remaining: number }> {
+  const { results: rows } = await env.DB
     .prepare("SELECT * FROM scores WHERE chart_id IS NULL")
     .all<Record<string, any>>();
   let linked = 0;
   for (const row of rows) {
     const { song, chart } = await findChartByTitle(
-      c.env.DB, row.raw_title, row.play_style, row.difficulty,
+      env.DB, row.raw_title, row.play_style, row.difficulty,
     );
     if (!song || !chart) continue;
     const merged: Record<string, any> = {
@@ -1223,17 +1494,28 @@ app.post("/api/admin/relink", async (c) => {
       difficulty: chart.difficulty,
       level: chart.level,
     };
-    const checks = recomputeChecks(merged, chart);
-    await c.env.DB
+    const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, env.MY_DANCER_NAME) : false;
+    const checks = recomputeChecks(merged, chart, { playerUnresolved });
+    await env.DB
       .prepare(
-        "UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?, ex_check = ?, judge_sum_check = ?, needs_review = ? WHERE id = ?",
+        `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
+         ex_check = ?, judge_sum_check = ?, needs_review = ?,
+         review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
       )
       .bind(chart.chart_id, chart.song_id, chart.play_style, chart.difficulty, chart.level,
         checks.ex_check, checks.judge_sum_check, checks.needs_review, row.id)
       .run();
+    if (checks.needs_review === 0) {
+      await deleteReviewImage(env, row.id);
+    }
     linked += 1;
   }
-  return c.json({ checked: rows.length, linked, remaining: rows.length - linked });
+  return { checked: rows.length, linked, remaining: rows.length - linked };
+}
+
+// ---- POST /api/admin/relink: re-run title matching for unlinked scores ----
+app.post("/api/admin/relink", async (c) => {
+  return c.json(await relinkUnlinkedScores(c.env));
 });
 
 // ---- POST /api/admin/sync ----
@@ -1241,7 +1523,11 @@ app.post("/api/admin/sync", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { url?: string };
   const url = body.url || c.env.MASTER_URL || DEFAULT_MASTER_URL;
   try {
-    return c.json(await syncMaster(c.env.DB, url));
+    const res = await syncMaster(c.env.DB, url);
+    const relink = res.songWrites > 0 || res.chartWrites > 0
+      ? await relinkUnlinkedScores(c.env)
+      : { checked: 0, linked: 0, remaining: 0 };
+    return c.json({ ...res, relink });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
@@ -1256,11 +1542,14 @@ const handler: ExportedHandler<Env> = {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(
       syncMaster(env.DB, env.MASTER_URL || DEFAULT_MASTER_URL)
-        .then((r) =>
+        .then(async (r) => {
+          const relink = r.songWrites > 0 || r.chartWrites > 0
+            ? await relinkUnlinkedScores(env)
+            : { linked: 0 };
           console.log(
-            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites}`,
-          ),
-        )
+            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites} relinked=${relink.linked}`,
+          );
+        })
         .catch((e) => console.error(`[cron sync] failed: ${e instanceof Error ? e.message : String(e)}`)),
     );
   },

@@ -665,3 +665,77 @@ test("computeStats: graphs aggregate level x month, judge days and coverage", ()
   assert.deepEqual(cov("SP", 18, "CHALLENGE"), { play_style: "SP", level: 18, difficulty: "CHALLENGE", total: 1, played: 1, cleared: 1 });
   assert.deepEqual(cov("DP", 16, "EXPERT"), { play_style: "DP", level: 16, difficulty: "EXPERT", total: 1, played: 0, cleared: 0 });
 });
+
+test("computeReviewReasons & evaluateScore flag all inconsistency types", async () => {
+  const { computeReviewReasons, evaluateScore } = await import("../src/lib");
+  const basePlayer = {
+    score: 950000,
+    level: 16,
+    ex_score: 1400,
+    marvelous: 400,
+    perfect: 100,
+    great: 0,
+    good: 0,
+    ok: 0,
+    miss: 0,
+  };
+  const baseChart = { notes: 500, shock: 0, level: 16, max_ex: 1500 };
+
+  // Clean match -> no reasons
+  const clean = evaluateScore(basePlayer, baseChart, { songLinked: true, chartLinked: true });
+  assert.equal(clean.needs_review, false);
+  assert.deepEqual(clean.reasons, []);
+
+  // Unlinked song
+  assert.deepEqual(
+    computeReviewReasons(basePlayer, null, { songLinked: false, chartLinked: false }).map((r) => r.code),
+    ["unlinked_song"],
+  );
+
+  // Difficulty mismatch (song matched, chart missing)
+  assert.deepEqual(
+    computeReviewReasons(basePlayer, null, { songLinked: true, chartLinked: false }).map((r) => r.code),
+    ["difficulty_mismatch"],
+  );
+
+  // Level mismatch + EX mismatch + judge sum mismatch + player unresolved
+  const multi = evaluateScore(
+    { ...basePlayer, level: 15, ex_score: 1390, marvelous: 390 },
+    baseChart,
+    { songLinked: true, chartLinked: true, playerUnresolved: true },
+  );
+  assert.equal(multi.needs_review, true);
+  assert.deepEqual(
+    multi.reasons.map((r) => r.code),
+    ["level_mismatch", "ex_mismatch", "judge_sum_mismatch", "player_unresolved"],
+  );
+  assert.deepEqual(multi.reasons.find((r) => r.code === "level_mismatch")?.detail, {
+    extracted_level: 15,
+    master_level: 16,
+  });
+  assert.deepEqual(multi.reasons.find((r) => r.code === "ex_mismatch")?.detail, {
+    ex_score: 1390,
+    calc_ex: 1370,
+    diff: 20,
+  });
+  assert.deepEqual(multi.reasons.find((r) => r.code === "judge_sum_mismatch")?.detail, {
+    judge_sum: 490,
+    expected: 500,
+  });
+
+  // EX invalid: exceeds max_ex
+  const overMax = computeReviewReasons(
+    { ...basePlayer, ex_score: 1501, marvelous: 500, perfect: 0 },
+    baseChart,
+    { songLinked: true, chartLinked: true },
+  );
+  assert.equal(overMax.some((r) => r.code === "ex_invalid" && r.detail?.reason === "exceeds_max_ex"), true);
+
+  // EX invalid: missing or zero with positive score
+  const zeroEx = computeReviewReasons(
+    { ...basePlayer, ex_score: 0 },
+    baseChart,
+    { songLinked: true, chartLinked: true },
+  );
+  assert.equal(zeroEx.some((r) => r.code === "ex_invalid" && r.detail?.reason === "missing_or_zero"), true);
+});
