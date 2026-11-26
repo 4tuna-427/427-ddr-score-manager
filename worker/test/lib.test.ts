@@ -14,6 +14,7 @@ import {
   expandMaster,
   expandMasterSong,
   judgeSumCheck,
+  correctOkValue,
   normalizeTitle,
   computeReviewReasons,
   computeStats,
@@ -859,4 +860,34 @@ test("judgeSumCheck: dropped freezes count as Miss (judgeSum = notes + freeze + 
   assert.equal(judgeSumCheck({ ...play, ok: null }, chart), "check"); // 650 != 649 without the identity
   assert.equal(judgeSumCheck(play, { notes: 649, shock: null }), "check");
   assert.equal(judgeSumCheck({ ...play, miss: 1, ok: null }, { notes: 649, shock: null }), "match");
+});
+
+test("correctOkValue: repairs the O.K. trailing-digit misread only when proven", () => {
+  // 8ISMUTH OVERDRIV3 ESP (notes 649, freeze 96): true ok 95 read as 950.
+  const chart: any = { notes: 649, freeze: 96, shock: null, level: 15, max_ex: 2235 };
+  const play: any = { marvelous: 563, perfect: 81, great: 4, good: 0, miss: 2, ok: 950, ex_score: 2140, score: 994310, level: 15 };
+  assert.deepEqual(correctOkValue(play, chart), { ok: 95, corrected: true });
+  const ev = evaluateScore({ ...play, ok: 95 }, chart, { songLinked: true, chartLinked: true });
+  assert.equal(ev.needs_review, false);
+
+  // Already-consistent value is never touched.
+  assert.deepEqual(correctOkValue({ ...play, ok: 95 }, chart), { ok: 95, corrected: false });
+  // Candidate that fails the EX cross-check is not accepted.
+  assert.deepEqual(correctOkValue({ ...play, ex_score: 2000 }, chart), { ok: 950, corrected: false });
+  // Candidate that fails the judge-sum identity is not accepted.
+  assert.deepEqual(correctOkValue({ ...play, marvelous: 560 }, chart), { ok: 950, corrected: false });
+  // No EX read -> cannot prove -> untouched. No chart / single digit -> untouched.
+  assert.deepEqual(correctOkValue({ ...play, ex_score: null }, chart), { ok: 950, corrected: false });
+  assert.deepEqual(correctOkValue(play, null), { ok: 950, corrected: false });
+  assert.deepEqual(correctOkValue({ ...play, ok: 9 }, chart), { ok: 9, corrected: false });
+
+  // Shock chart (Another Phase CSP 542/6/41): true ok 47 read as 470.
+  const apChart: any = { notes: 542, freeze: 6, shock: 41, level: 16, max_ex: 1767 };
+  const apPlay: any = { marvelous: 451, perfect: 86, great: 5, good: 0, miss: 0, ok: 470, ex_score: 1671, score: 995690, level: 16 };
+  assert.deepEqual(correctOkValue(apPlay, apChart), { ok: 47, corrected: true });
+
+  // Two bled digits (true ok 8, read 812): the /100 candidate proves out.
+  const small: any = { notes: 100, freeze: 8, shock: 0, level: 10, max_ex: 324 };
+  const smallPlay: any = { marvelous: 90, perfect: 10, great: 0, good: 0, miss: 0, ok: 812, ex_score: (90 + 8) * 3 + 10 * 2, score: 990000, level: 10 };
+  assert.deepEqual(correctOkValue(smallPlay, small), { ok: 8, corrected: true });
 });

@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import {
   chartId as makeChartId,
   choosePlayer,
+  correctOkValue,
   evaluateScore,
   expandMaster,
   planSync,
@@ -295,7 +296,11 @@ function buildFields(
   playerUnresolved: boolean,
 ): ScoreFields {
   const playStyle = ext.play_style ?? "SP";
-  const ev = evaluateScore(player, chart, {
+  // Repair the O.K. trailing-digit misread when the correction is provable
+  // (raw_extraction keeps the original read for audit).
+  const okFix = correctOkValue(player, chart);
+  const effective = okFix.corrected ? { ...player, ok: okFix.ok } : player;
+  const ev = evaluateScore(effective, chart, {
     songLinked: !!song,
     chartLinked: !!chart,
     playerUnresolved,
@@ -316,7 +321,7 @@ function buildFields(
     perfect: player.perfect,
     great: player.great,
     good: player.good,
-    ok: player.ok,
+    ok: effective.ok,
     miss: player.miss,
     fast_count: player.fast_count,
     slow_count: player.slow_count,

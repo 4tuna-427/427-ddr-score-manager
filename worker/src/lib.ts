@@ -227,6 +227,40 @@ const expected = expectedJudgeSum(p, chart) ?? chart.notes;
 return judgeSum(p) === expected? "match": "check";
 }
 
+/**
+ * Repair a known extraction misread: the O.K. count sometimes gains a
+ * trailing digit bled from the neighbouring Good/Miss field (e.g. 8 read
+ * as 80). The dropped-digit candidate is accepted only when it makes BOTH
+ * independent identities hold exactly — the EX cross-check and the
+ * judge-sum identity — and fits the chart's O.K. maximum; that makes the
+ * correction a proof, not a guess. When the read value is already
+ * consistent, or the chart / EX data needed to prove a candidate is
+ * missing, the value is returned untouched (the play stays in review).
+ * The original read remains available in the stored raw_extraction.
+ */
+export function correctOkValue(
+p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss" | "ok" | "ex_score">,
+chart: ChartLike | null | undefined,
+): { ok: number | null; corrected: boolean } {
+const ok = p.ok;
+if (ok == null || ok < 10 || !chart || chart.notes == null || chart.freeze == null) {
+  return { ok, corrected: false };
+}
+const maxOk = chart.freeze + (chart.shock ?? 0);
+const proves = (v: number): boolean => {
+  if (v < 0 || v > maxOk) return false;
+  if (judgeSum(p) !== chart.notes! + chart.freeze! + (chart.shock ?? 0) - v) return false;
+  const calc = calcEx({ marvelous: p.marvelous, perfect: p.perfect, great: p.great, ok: v });
+  return calc != null && p.ex_score != null && calc === p.ex_score;
+};
+if (proves(ok)) return { ok, corrected: false };
+for (const divisor of [10, 100]) {
+  const candidate = Math.floor(ok / divisor);
+  if (candidate < ok && proves(candidate)) return { ok: candidate, corrected: true };
+}
+return { ok, corrected: false };
+}
+
 export interface ScoreEvaluation {
 ex_check: ExCheck;
 judge_sum_check: JudgeSumCheck;
