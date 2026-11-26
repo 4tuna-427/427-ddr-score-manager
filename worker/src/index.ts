@@ -28,7 +28,7 @@ import {
   type PlayerExtraction,
   type SongRow,
 } from "./lib";
-import { extractFromImage } from "./gemini";
+import { extractFromImage, GeminiQuotaExhaustedError } from "./gemini";
 
 export interface Env {
   DB: D1Database;
@@ -314,10 +314,18 @@ app.post("/api/analyze", async (c) => {
     // image_hash column missing (migration 0002 not applied yet): skip check.
   }
 
+  // bulk=1 (mass import of past photos): reduced in-model retries so a
+  // transient error burst does not burn the daily free quota.
+  const bulk = form.get("bulk") === "1";
   let extraction: Extraction;
   try {
-    extraction = await extractFromImage(c.env, file);
+    extraction = await extractFromImage(c.env, file, { bulk });
   } catch (e) {
+    if (e instanceof GeminiQuotaExhaustedError) {
+      // Every model ran out of free quota: tell the client to stop for
+      // today (429) instead of looking like a generic failure (502).
+      return c.json({ error: "quota_exhausted", detail: e.message }, 429);
+    }
     return c.json({ error: `gemini extraction failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
 

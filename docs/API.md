@@ -68,7 +68,8 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 ### GET /api/health → `{ok:true}`
 
 ### POST /api/analyze
-- リクエスト: `multipart/form-data`、フィールド `file`（画像）、任意で `source`、任意で `played_at`（ISO文字列。写真の撮影日時=EXIF由来。妥当な範囲（2010年以降・未来+1時間以内）ならその値を scores.played_at に採用し、無効ならアップロード時刻を使う）。
+- リクエスト: `multipart/form-data`、フィールド `file`（画像）、任意で `source`、任意で `played_at`（ISO文字列。写真の撮影日時=EXIF由来。妥当な範囲（2010年以降・未来+1時間以内）ならその値を scores.played_at に採用し、無効ならアップロード時刻を使う）、任意で `bulk`（`1` のとき一括取り込みモード：Gemini のモデル内リトライを1回に縮小する）。
+- 無料枠切れ: 試した全モデルが最終的に 429 で失敗した場合は `429 {error:"quota_exhausted", detail}` を返す（クライアントはその日の送信を止める）。それ以外の抽出失敗は従来どおり `502`。
 - 重複検出: 受信画像バイト列の SHA-256 を scores.image_hash と照合し、一致したら Gemini を呼ばずに `409 {error:"duplicate", score_id}` を返す（migration 0002 適用後に有効。未適用時はチェックをスキップ）。
 - 処理: 画像を長辺1600px相当のまま Gemini に送信（Workers では受け取った Blob をそのまま中継し、リサイズはフロント側で行う前提。未リサイズでも受け付ける）→ 抽出 → 自プレイヤー確定 → 曲名寄せ → 検算 → D1保存。
 - 自プレイヤー確定: 環境変数 `MY_DANCER_NAME`（例 4TUNA）と正規化比較（大文字小文字無視、前後空白除去）で一致したプレイヤーを採用。ソロは player_1。バーサスで両方一致しない場合は player_1 を仮採用し `needs_review=1`、`raw_extraction` に全体を保存。
@@ -172,7 +173,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 
 ## Gemini 連携
 - エンドポイント: `POST https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent`、ヘッダ `x-goog-api-key: {GEMINI_API_KEY}`（どちらも Workers 環境変数/シークレット。GEMINI_MODEL 既定 gemini-3.5-flash-lite）
-- モデルフォールバック: モデルは優先順リストで試す。既定は `gemini-3.5-flash-lite` → `gemini-2.5-flash-lite`。`GEMINI_MODEL`（wrangler.toml の `[vars]`）でプライマリを変更でき、`GEMINI_MODELS`（カンマ区切り、シークレット/変数で設定）に指定するとリスト全体を上書きする。各モデル内では 503/429 を最大3回リトライ（1.5s/4s/9s）し、404 またはリトライ切れの 503/429 で次モデルへ移る。400/401/403 などは即失敗する。
+- モデルフォールバック: モデルは優先順リストで試す。既定は `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite`（各500回/日の無料枠が別枠のため併用で実質1,000枚/日。2.5-flash-lite はこのプロジェクトで 404＝提供終了のため使わない。3.1 は Phase 0 実画像で 151/152＝99.3%・検算全件パスを実測済み）。`GEMINI_MODEL`（wrangler.toml の `[vars]`）でプライマリを変更でき、`GEMINI_MODELS`（カンマ区切り、シークレット/変数で設定）に指定するとリスト全体を上書きする。各モデル内では 503/429 を最大3回リトライ（1.5s/4s/9s、一括モード時は1回・4s）し、404 またはリトライ切れの 503/429 で次モデルへ移る。400/401/403 などは即失敗する。全モデルが最終的に 429 の場合は枠切れとして `GeminiQuotaExhaustedError` を投げ、`/api/analyze` は 429 を返す。
 - プロンプトとスキーマは Phase 0 の確定版を使う: `../../phase0/prompt.md` の内容（＋ダンサーネームは上部バナーのみ読む旨の1行追加）と `../../phase0/gemini_schema_api.json`。worker のソース内に定数として埋め込む。
 - 画像は base64 で inline_data として送る。mime は受け取ったファイルの type を使う。
 

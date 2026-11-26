@@ -7,8 +7,48 @@ export interface GeminiEnv {
   GEMINI_MODELS?: string;
 }
 
-/** Default model priority: current primary, then the fallback. */
-export const DEFAULT_GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"];
+/**
+ * Default model priority: current primary, then the fallback.
+ * gemini-2.5-flash-lite is NOT used: it returns 404 (no longer available
+ * to new users) for this project, so it cannot serve as a fallback.
+ * gemini-3.1-flash-lite was verified on the Phase 0 photos at 151/152
+ * fields (99.3%, same as the primary) and has its own 500/day free quota.
+ */
+export const DEFAULT_GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+
+/**
+ * Thrown when every model in the list ultimately failed with HTTP 429,
+ * i.e. the free-tier daily quota is exhausted across all models.
+ * Callers (POST /api/analyze) map this to HTTP 429 quota_exhausted so
+ * the client can stop instead of retrying forever.
+ */
+export class GeminiQuotaExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GeminiQuotaExhaustedError";
+  }
+}
+
+/** A 429 whose body names quota exhaustion is definitely a quota stop. */
+export function isQuotaExhaustedBody(bodyText: string): boolean {
+  return /RESOURCE_EXHAUSTED/i.test(bodyText) || /quota/i.test(bodyText);
+}
+
+/**
+ * In-model retry delays. Normal mode backs off generously; bulk mode
+ * (bulk=1, mass import of past photos) retries at most once per model
+ * so a transient error burst does not burn the daily quota.
+ */
+export function retryDelaysMs(bulk: boolean): number[] {
+  return bulk ? [4000] : [1500, 4000, 9000];
+}
+
+export interface ExtractOptions {
+  /** Bulk import mode: reduced in-model retries (see retryDelaysMs). */
+  bulk?: boolean;
+  /** Test hook: replace the retry sleep. */
+  sleep?: (ms: number) => Promise<void>;
+}
 
 /**
  * Ordered model list for extraction. GEMINI_MODELS (comma-separated) wins
@@ -389,8 +429,10 @@ function bytesToBase64(bytes: Uint8Array): string {
 export async function extractFromImage(
   env: GeminiEnv,
   image: Blob,
+  opts: ExtractOptions = {},
 ): Promise<Extraction> {
   const models = resolveModelList(env);
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const buf = new Uint8Array(await image.arrayBuffer());
   const body = {
     contents: [
@@ -409,9 +451,16 @@ export async function extractFromImage(
   };
   // The free tier (especially flash-lite) returns transient 503
   // "high demand" errors in bursts. Retry those (and 429) with backoff
-  // inside the request so the client rarely sees them.
-  const RETRY_DELAYS_MS = [1500, 4000, 9000];
+  // inside the request so the client rarely sees them. Bulk mode uses
+  // a single retry per model so transient bursts do not waste quota.
+  const RETRY_DELAYS_MS = retryDelaysMs(!!opts.bulk);
   let lastError: Error | null = null;
+  // Quota tracking: record each model's final outcome. The daily free
+  // quota counts as exhausted when every tried model ended in 429, or
+  // when the only non-429 outcomes are 404 (model unavailable) and at
+  // least one model returned a 429 whose body names RESOURCE_EXHAUSTED
+  // / quota (which makes the quota stop certain for that model).
+  const outcomes: string[] = [];
   for (const model of models) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     let res: Response | null = null;
@@ -433,7 +482,7 @@ export async function extractFromImage(
       if (res && res.ok) break;
       if (res && !isRetryableStatus(res.status)) break;
       if (attempt === RETRY_DELAYS_MS.length) break;
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      await sleep(RETRY_DELAYS_MS[attempt]);
     }
     if (res && res.ok) {
       const data: any = await res.json();
@@ -444,12 +493,21 @@ export async function extractFromImage(
     if (res) {
       const text = await res.text();
       lastError = new Error(`Gemini API error ${res.status} (model ${model}): ${text.slice(0, 500)}`);
+      outcomes.push(res.status === 429 && isQuotaExhaustedBody(text) ? "429-quota" : String(res.status));
       // Only fall through to the next model for 404/503/429; anything
       // else (bad key, bad request, ...) would fail the same way there.
       if (!isModelFallbackStatus(res.status)) throw lastError;
+    } else {
+      outcomes.push("network");
     }
     // Network failure with no response: also try the next model, since a
     // per-model endpoint problem is possible (and cheap to rule out).
+  }
+  const all429 = outcomes.length > 0 && outcomes.every((o) => o === "429" || o === "429-quota");
+  const quotaMarkedWithOnly404Else = outcomes.includes("429-quota") &&
+    outcomes.every((o) => o === "429-quota" || o === "404");
+  if (lastError && (all429 || quotaMarkedWithOnly404Else)) {
+    throw new GeminiQuotaExhaustedError(lastError.message);
   }
   throw lastError ?? new Error("Gemini API error: no model responded");
 }

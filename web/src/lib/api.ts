@@ -103,11 +103,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
-export function analyzeImage(file: Blob, source: string, playedAtIso?: string): Promise<AnalyzeResult> {
+export function analyzeImage(file: Blob, source: string, playedAtIso?: string, bulk?: boolean): Promise<AnalyzeResult> {
   const fd = new FormData()
   fd.append('file', file, 'result.webp')
   fd.append('source', source)
   if (playedAtIso) fd.append('played_at', playedAtIso)
+  // Bulk import mode: the Worker reduces in-model retries for this call.
+  if (bulk) fd.append('bulk', '1')
   return request<AnalyzeResult>('/api/analyze', { method: 'POST', body: fd })
 }
 

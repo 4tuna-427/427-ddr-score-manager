@@ -401,17 +401,17 @@ test("computeCloseCalls finds AAA-near and lamp-near charts", async () => {
 
 test("resolveModelList orders models and honors GEMINI_MODELS override", async () => {
   const { resolveModelList } = await import("../src/gemini");
-  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x" }), ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]);
+  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x" }), ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]);
   assert.deepEqual(
     resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODEL: "gemini-2.5-flash" }),
-    ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"],
+    ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"],
   );
   // Explicit override replaces the whole list (deduped, order kept).
   assert.deepEqual(
     resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODELS: "gemini-2.5-flash, gemini-3.5-flash-lite, gemini-2.5-flash" }),
     ["gemini-2.5-flash", "gemini-3.5-flash-lite"],
   );
-  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODELS: "  " }), ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]);
+  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "x", GEMINI_MODELS: "  " }), ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]);
 });
 
 test("computeStats: monthly and per-level EX rates use only charts with max_ex", async () => {

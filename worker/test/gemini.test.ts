@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractFromImage } from "../src/gemini";
+import {
+  extractFromImage,
+  resolveModelList,
+  retryDelaysMs,
+  GeminiQuotaExhaustedError,
+  DEFAULT_GEMINI_MODELS,
+} from "../src/gemini";
 
 // Model fallback is exercised with a stubbed fetch: no network, no API key.
 
@@ -41,7 +47,7 @@ test("extractFromImage falls back to the next model on 404", async () => {
     assert.equal(ext.song_title, "Test");
     assert.equal(calls.length, 2);
     assert.ok(calls[0].includes("gemini-3.5-flash-lite"));
-    assert.ok(calls[1].includes("gemini-2.5-flash-lite"));
+    assert.ok(calls[1].includes("gemini-3.1-flash-lite"));
   } finally {
     restore();
   }
@@ -66,9 +72,85 @@ test("extractFromImage throws the last model's error when all models fail", asyn
   try {
     await assert.rejects(
       () => extractFromImage({ GEMINI_API_KEY: "k" }, blob()),
-      /gemini-2.5-flash-lite/,
+      /gemini-3.1-flash-lite/,
     );
   } finally {
     restore();
   }
+});
+
+test("default model list is 3.5-flash-lite then 3.1-flash-lite (no 2.5, no 3.8)", () => {
+  assert.deepEqual(DEFAULT_GEMINI_MODELS, ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]);
+  assert.deepEqual(resolveModelList({ GEMINI_API_KEY: "k" }), [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+  ]);
+});
+
+const quotaBody = JSON.stringify({
+  error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "Quota exceeded for quota metric" },
+});
+const noSleep = async () => {};
+
+test("extractFromImage throws GeminiQuotaExhaustedError when all models end in 429", async () => {
+  const restore = withStubbedFetch(() => new Response(quotaBody, { status: 429 }));
+  try {
+    await assert.rejects(
+      () => extractFromImage({ GEMINI_API_KEY: "k" }, blob(), { sleep: noSleep }),
+      (e: unknown) => e instanceof GeminiQuotaExhaustedError,
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("extractFromImage does not call it quota when a model fails differently (429 then 404)", async () => {
+  const restore = withStubbedFetch((url) =>
+    url.includes("gemini-3.5-flash-lite")
+      ? new Response("rate limited", { status: 429 })
+      : new Response("gone", { status: 404 }),
+  );
+  try {
+    await assert.rejects(
+      () => extractFromImage({ GEMINI_API_KEY: "k" }, blob(), { sleep: noSleep }),
+      (e: unknown) => !(e instanceof GeminiQuotaExhaustedError) && /404/.test(String(e)),
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("bulk mode retries each model only once (delays [4000]); normal mode keeps [1500,4000,9000]", async () => {
+  assert.deepEqual(retryDelaysMs(true), [4000]);
+  assert.deepEqual(retryDelaysMs(false), [1500, 4000, 9000]);
+
+  const countCalls = async (bulk: boolean) => {
+    let calls = 0;
+    const delays: number[] = [];
+    const restore = withStubbedFetch(() => {
+      calls++;
+      return new Response("busy", { status: 503 });
+    });
+    try {
+      await assert.rejects(() =>
+        extractFromImage({ GEMINI_API_KEY: "k" }, blob(), {
+          bulk,
+          sleep: async (ms: number) => {
+            delays.push(ms);
+          },
+        }),
+      );
+    } finally {
+      restore();
+    }
+    return { calls, delays };
+  };
+
+  // 2 models: bulk = 2 attempts/model, normal = 4 attempts/model.
+  const bulkRun = await countCalls(true);
+  assert.equal(bulkRun.calls, 4);
+  assert.deepEqual(bulkRun.delays, [4000, 4000]);
+  const normalRun = await countCalls(false);
+  assert.equal(normalRun.calls, 8);
+  assert.deepEqual(normalRun.delays, [1500, 4000, 9000, 1500, 4000, 9000]);
 });
