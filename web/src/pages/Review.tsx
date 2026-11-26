@@ -7,6 +7,7 @@ import {
   listScores,
   patchScore,
   relinkScores,
+  resolveReview,
   searchSongs,
   selectPlayer,
   type Score,
@@ -20,9 +21,67 @@ import { ReviewReasonBadges } from '../components/ReviewReasonBadges'
 type FilterTab = 'all' | 'song' | 'score' | 'waiting'
 
 const DIFFS = ['BEGINNER', 'BASIC', 'DIFFICULT', 'EXPERT', 'CHALLENGE'] as const
+const MASTER_REPO_URL = 'https://github.com/4tuna-427/ddr-song-data'
 
 function hasReason(score: Score, codes: string[]): boolean {
   return (score.review_reasons ?? []).some((r) => codes.includes(r.code))
+}
+
+function isMasterRelated(score: Score): boolean {
+  return (score.review_reasons ?? []).some((r) => {
+    if (
+      r.code === 'unlinked_song' ||
+      r.code === 'difficulty_mismatch' ||
+      r.code === 'level_mismatch' ||
+      r.code === 'judge_sum_mismatch' ||
+      r.code === 'ok_exceeds_max' ||
+      r.code === 'max_combo_exceeds_notes'
+    ) {
+      return true
+    }
+    if (r.code === 'ex_invalid' && r.detail?.reason === 'exceeds_max_ex') {
+      return true
+    }
+    return false
+  })
+}
+
+function buildMasterIssueUrl(score: Score): string {
+  const titleName = score.song_title || score.raw_title || '(曲名不明)'
+  const issueTitle = `[マスタ修正] ${titleName} (${score.play_style} ${score.difficulty})`
+
+  const reasonsLines = (score.review_reasons ?? []).map((r) => {
+    const detail = r.detail ? ` (${JSON.stringify(r.detail)})` : ''
+    return `- \`${r.code}\`${detail}`
+  })
+
+  const lines = [
+    '## マスタ修正依頼',
+    '',
+    'スコア登録時の検算でマスタデータとの不一致が発生しました。',
+    '',
+    '### 楽曲・譜面情報',
+    `- 曲名 (マスタ): ${score.song_title ?? '未紐付け'}`,
+    `- 曲名 (読取): ${score.raw_title ?? '—'}`,
+    `- song_id: \`${score.song_id ?? 'null'}\``,
+    `- chart_id: \`${score.chart_id ?? 'null'}\``,
+    `- スタイル / 難易度: ${score.play_style} ${score.difficulty}`,
+    `- レベル (読取 vs マスタ): Lv${score.level ?? '?'} vs Lv${score.chart_level ?? '?'}`,
+    '',
+    '### 要確認理由',
+    ...(reasonsLines.length > 0 ? reasonsLines : ['- (なし)']),
+    '',
+    '### 参考スコア・判定内訳',
+    `- Score: ${score.score.toLocaleString()} / EX: ${score.ex_score ?? '—'} (マスタ max_ex: ${score.chart_max_ex ?? '—'})`,
+    `- Marvelous: ${score.marvelous ?? '—'} / Perfect: ${score.perfect ?? '—'} / Great: ${score.great ?? '—'} / Good: ${score.good ?? '—'} / O.K.: ${score.ok ?? '—'} / Miss: ${score.miss ?? '—'}`,
+    `- Max Combo: ${score.max_combo ?? '—'} (マスタ notes: ${score.chart_notes ?? '—'}, freeze: ${score.chart_freeze ?? '—'}, shock: ${score.chart_shock ?? '—'})`,
+  ]
+
+  const params = new URLSearchParams({
+    title: issueTitle,
+    body: lines.join('\n'),
+  })
+  return `${MASTER_REPO_URL}/issues/new?${params.toString()}`
 }
 
 function matchesTab(score: Score, tab: FilterTab): boolean {
@@ -34,7 +93,17 @@ function matchesTab(score: Score, tab: FilterTab): boolean {
       hasReason(score, ['unlinked_song', 'difficulty_mismatch', 'level_mismatch'])
     )
   }
-  return hasReason(score, ['ex_mismatch', 'ex_invalid', 'judge_sum_mismatch', 'player_unresolved'])
+  return (
+    score.review_status !== 'waiting_master' &&
+    hasReason(score, [
+      'ex_mismatch',
+      'ex_invalid',
+      'judge_sum_mismatch',
+      'ok_exceeds_max',
+      'max_combo_exceeds_notes',
+      'player_unresolved',
+    ])
+  )
 }
 
 interface ReviewCardProps {
@@ -89,6 +158,14 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
   const isDiffMismatch = reasons.some((r) => r.code === 'difficulty_mismatch')
   const isPlayerUnresolved = reasons.some((r) => r.code === 'player_unresolved')
   const isWaiting = score.review_status === 'waiting_master'
+  const masterRelated = isMasterRelated(score)
+
+  const openMasterIssue = () => {
+    window.open(buildMasterIssueUrl(score), '_blank', 'noopener,noreferrer')
+    if (!isWaiting) {
+      void runAction(() => patchScore(score.id, { review_status: 'waiting_master' }))
+    }
+  }
 
   const runAction = async (fn: () => Promise<unknown>) => {
     setBusy(true)
@@ -265,13 +342,19 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
         </button>
 
         {(isUnlinkedSong || isDiffMismatch) && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setPanel((p) => (p === 'custom' ? 'none' : 'custom'))}
+          >
+            {panel === 'custom' ? '仮登録を閉じる' : '仮の楽曲を登録'}
+          </button>
+        )}
+
+        {masterRelated && (
           <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setPanel((p) => (p === 'custom' ? 'none' : 'custom'))}
-            >
-              {panel === 'custom' ? '仮登録を閉じる' : '仮の楽曲を登録'}
+            <button type="button" disabled={busy} onClick={openMasterIssue}>
+              マスタ修正を報告 (GitHub)
             </button>
             <button
               type="button"
@@ -285,6 +368,16 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
               {isWaiting ? '更新待ちを解除' : 'マスタ更新待ちにする'}
             </button>
           </>
+        )}
+
+        {score.chart_id && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => runAction(() => resolveReview(score.id))}
+          >
+            このまま確定
+          </button>
         )}
 
         <button
@@ -522,10 +615,12 @@ export function ReviewPage() {
     setRelinkMsg('')
     try {
       const r = await relinkScores()
-      setRelinkMsg(`再マッチングしました：${r.checked}件中 ${r.linked}件を自動でリンク、残り ${r.remaining}件`)
+      setRelinkMsg(
+        `再マッチング：${r.checked}件中 ${r.linked}件リンク（残り${r.remaining}件）／再検算：${r.rechecked ?? 0}件中 ${r.resolved ?? 0}件解決`,
+      )
       await load()
     } catch (e) {
-      setRelinkMsg(`再マッチングに失敗しました: ${e instanceof Error ? e.message : String(e)}`)
+      setRelinkMsg(`再マッチング・再検算に失敗しました: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setRelinking(false)
     }
@@ -536,7 +631,7 @@ export function ReviewPage() {
       <div className="review-header">
         <h1>要確認 {items.length > 0 && <span className="badge">{items.length}件</span>}</h1>
         <button type="button" className="primary" onClick={doRelink} disabled={relinking}>
-          {relinking ? '再マッチング中…' : '未リンクを再マッチング'}
+          {relinking ? '再マッチング・再検算中…' : '再マッチング・再検算'}
         </button>
       </div>
       <p className="muted">

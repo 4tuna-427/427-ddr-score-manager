@@ -955,6 +955,24 @@ app.post("/api/scores/:id/link", async (c) => {
   return c.json({ score: updated });
 });
 
+// ---- POST /api/scores/:id/resolve-review ----
+app.post("/api/scores/:id/resolve-review", async (c) => {
+  const id = c.req.param("id");
+  const row = await getScore(c.env.DB, id);
+  if (!row) return c.json({ error: "not found" }, 404);
+  if (!row.chart_id) {
+    return c.json({ error: "cannot resolve review for unlinked score" }, 400);
+  }
+  await c.env.DB
+    .prepare("UPDATE scores SET needs_review = 0, review_status = NULL, has_review_image = 0 WHERE id = ?")
+    .bind(id)
+    .run();
+  await deleteReviewImage(c.env, id);
+  const updated = await getScore(c.env.DB, id);
+  if (updated) await attachReviewDetails(c.env.DB, [updated as Record<string, any>], c.env.MY_DANCER_NAME);
+  return c.json({ score: updated });
+});
+
 // ---- GET /api/targets / POST /api/targets / DELETE /api/targets/:chart_id ----
 const TARGET_LAMPS = ["CLEAR", "LIFE4", "FC", "GFC", "PFC", "MFC"] as const;
 
@@ -1516,9 +1534,43 @@ async function relinkUnlinkedScores(
   return { checked: rows.length, linked, remaining: rows.length - linked };
 }
 
-// ---- POST /api/admin/relink: re-run title matching for unlinked scores ----
+async function recheckLinkedNeedsReviewScores(
+  env: Env,
+): Promise<{ rechecked: number; resolved: number }> {
+  const { results: rows } = await env.DB
+    .prepare("SELECT * FROM scores WHERE chart_id IS NOT NULL AND needs_review = 1")
+    .all<Record<string, any>>();
+  let resolved = 0;
+  for (const row of rows) {
+    const chart = await getChart(env.DB, String(row.chart_id));
+    if (!chart) continue;
+    const playerUnresolved = isPlayerUnresolved(row, env.MY_DANCER_NAME);
+    const checks = recomputeChecks(row, chart, { playerUnresolved });
+    if (checks.needs_review === 0) {
+      await env.DB
+        .prepare(
+          `UPDATE scores SET ex_check = ?, judge_sum_check = ?, needs_review = 0,
+           review_status = NULL, has_review_image = 0 WHERE id = ?`,
+        )
+        .bind(checks.ex_check, checks.judge_sum_check, row.id)
+        .run();
+      await deleteReviewImage(env, String(row.id));
+      resolved += 1;
+    } else if (checks.ex_check !== row.ex_check || checks.judge_sum_check !== row.judge_sum_check) {
+      await env.DB
+        .prepare("UPDATE scores SET ex_check = ?, judge_sum_check = ? WHERE id = ?")
+        .bind(checks.ex_check, checks.judge_sum_check, row.id)
+        .run();
+    }
+  }
+  return { rechecked: rows.length, resolved };
+}
+
+// ---- POST /api/admin/relink: re-run title matching & recheck linked review scores ----
 app.post("/api/admin/relink", async (c) => {
-  return c.json(await relinkUnlinkedScores(c.env));
+  const relink = await relinkUnlinkedScores(c.env);
+  const recheck = await recheckLinkedNeedsReviewScores(c.env);
+  return c.json({ ...relink, ...recheck });
 });
 
 // ---- POST /api/admin/sync ----
@@ -1527,10 +1579,14 @@ app.post("/api/admin/sync", async (c) => {
   const url = body.url || c.env.MASTER_URL || DEFAULT_MASTER_URL;
   try {
     const res = await syncMaster(c.env.DB, url);
-    const relink = res.songWrites > 0 || res.chartWrites > 0
+    const hasWrites = res.songWrites > 0 || res.chartWrites > 0;
+    const relink = hasWrites
       ? await relinkUnlinkedScores(c.env)
       : { checked: 0, linked: 0, remaining: 0 };
-    return c.json({ ...res, relink });
+    const recheck = hasWrites
+      ? await recheckLinkedNeedsReviewScores(c.env)
+      : { rechecked: 0, resolved: 0 };
+    return c.json({ ...res, relink, recheck });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
@@ -1546,11 +1602,15 @@ const handler: ExportedHandler<Env> = {
     ctx.waitUntil(
       syncMaster(env.DB, env.MASTER_URL || DEFAULT_MASTER_URL)
         .then(async (r) => {
-          const relink = r.songWrites > 0 || r.chartWrites > 0
+          const hasWrites = r.songWrites > 0 || r.chartWrites > 0;
+          const relink = hasWrites
             ? await relinkUnlinkedScores(env)
             : { linked: 0 };
+          const recheck = hasWrites
+            ? await recheckLinkedNeedsReviewScores(env)
+            : { resolved: 0 };
           console.log(
-            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites} relinked=${relink.linked}`,
+            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites} relinked=${relink.linked} resolved=${recheck.resolved}`,
           );
         })
         .catch((e) => console.error(`[cron sync] failed: ${e instanceof Error ? e.message : String(e)}`)),

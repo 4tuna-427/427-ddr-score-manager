@@ -206,11 +206,23 @@ export function linkChart(id: string, chartId: string): Promise<{ score: Score }
   })
 }
 
+export function resolveReview(id: string): Promise<{ score: Score }> {
+  return request(`/api/scores/${encodeURIComponent(id)}/resolve-review`, {
+    method: 'POST',
+  })
+}
+
 export function deleteScore(id: string): Promise<{ ok: boolean }> {
   return request(`/api/scores/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
-export function relinkScores(): Promise<{ checked: number; linked: number; remaining: number }> {
+export function relinkScores(): Promise<{
+  checked: number
+  linked: number
+  remaining: number
+  rechecked?: number
+  resolved?: number
+}> {
   return request('/api/admin/relink', { method: 'POST' })
 }
 
