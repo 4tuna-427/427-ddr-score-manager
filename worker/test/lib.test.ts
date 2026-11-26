@@ -156,33 +156,33 @@ test("v2 expansion computes max_ex from notecounts", () => {
   assert.equal(spBeginner.max_ex, (nc.notes + nc.freeze) * 3);
 });
 
-test("v2 expansion and judgeSumCheck handle shock-arrow charts without double counting", () => {
+test("v2 expansion and judgeSumCheck handle shock-arrow charts (notes excludes shock)", () => {
   const { charts } = expandMasterSong({
-    id: "cirno_math_academy",
-    title: "チルノのパーフェクトさんすう学園【ビートまりお】",
-    levels: { sp_challenge: 17 },
-    notecounts: { sp_challenge: { notes: 709, freeze: 163, shock: 146 } },
+    id: "override_esp",
+    title: "オーバーライド",
+    levels: { sp_expert: 15 },
+    notecounts: { sp_expert: { notes: 812, freeze: 29, shock: 2 } },
   });
   assert.equal(charts.length, 1);
-  assert.equal(charts[0].notes, 709);
-  assert.equal(charts[0].freeze, 163);
-  assert.equal(charts[0].shock, 146);
-  // max_ex = (tap_notes + freeze + shock) * 3 = ((709 - 146) + 163 + 146) * 3 = (709 + 163) * 3 = 2616
-  assert.equal(charts[0].max_ex, 2616);
+  assert.equal(charts[0].notes, 812);
+  assert.equal(charts[0].freeze, 29);
+  assert.equal(charts[0].shock, 2);
+  // max_ex = (notes + freeze + shock) * 3 = (812 + 29 + 2) * 3 = 2529
+  assert.equal(charts[0].max_ex, 2529);
 
-  // Tap judgments total 563 (= 709 - 146), O.K. = 309 (= 163 + 146), MAX COMBO = 709
+  // Tap judgments total 812 (= notes), O.K. = 31 (= freeze + shock), MAX COMBO = 814 (= notes + shock)
   const ev = evaluateScore(
     {
-      marvelous: 500,
-      perfect: 50,
+      marvelous: 700,
+      perfect: 100,
       great: 10,
-      good: 3,
+      good: 2,
       miss: 0,
-      ok: 309,
-      max_combo: 709,
-      ex_score: (500 + 309) * 3 + 50 * 2 + 10,
+      ok: 31,
+      max_combo: 814,
+      ex_score: (700 + 31) * 3 + 100 * 2 + 10,
       score: 990000,
-      level: 17,
+      level: 15,
     },
     charts[0],
     { songLinked: true, chartLinked: true },
@@ -778,16 +778,16 @@ test("computeReviewReasons & evaluateScore flag all inconsistency types", async 
   assert.equal(zeroEx.some((r) => r.code === "ex_invalid" && r.detail?.reason === "missing_or_zero"), true);
 
   // O.K. exceeds freeze + shock
-  const shockChart = { notes: 709, freeze: 163, shock: 146, level: 17, max_ex: 2616 };
+  const shockChart = { notes: 709, freeze: 163, shock: 146, level: 17, max_ex: 3054 };
   const overOk = computeReviewReasons(
     {
       ...basePlayer,
       level: 17,
-      marvelous: 563,
+      marvelous: 709,
       perfect: 0,
       ok: 310,
-      ex_score: (563 + 310) * 3,
-      max_combo: 709,
+      ex_score: (709 + 310) * 3,
+      max_combo: 855,
     },
     shockChart,
     { songLinked: true, chartLinked: true },
@@ -797,22 +797,22 @@ test("computeReviewReasons & evaluateScore flag all inconsistency types", async 
     detail: { ok: 310, max_ok: 309 },
   });
 
-  // MAX COMBO exceeds chart.notes
+  // MAX COMBO exceeds chart.notes + shock
   const overCombo = computeReviewReasons(
     {
       ...basePlayer,
       level: 17,
-      marvelous: 563,
+      marvelous: 709,
       perfect: 0,
       ok: 309,
-      ex_score: 2616,
-      max_combo: 710,
+      ex_score: 3054,
+      max_combo: 856,
     },
     shockChart,
     { songLinked: true, chartLinked: true },
   );
   assert.deepEqual(overCombo.find((r) => r.code === "max_combo_exceeds_notes"), {
     code: "max_combo_exceeds_notes",
-    detail: { max_combo: 710, max_notes: 709 },
+    detail: { max_combo: 856, max_notes: 855 },
   });
 });
