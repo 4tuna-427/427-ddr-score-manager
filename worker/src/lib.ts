@@ -138,6 +138,74 @@ function editRatio(a: string, b: string): number {
   return max === 0 ? 1 : 1 - levenshtein(a, b) / max;
 }
 
+/**
+ * Levenshtein distance with an early abort: returns cap + 1 as soon as
+ * the distance is provably above cap (row minima never decrease, so a
+ * row whose minimum exceeds cap settles it). Exact whenever the true
+ * distance is <= cap.
+ */
+function levenshteinCapped(a: string, b: string, cap: number): number {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  if (Math.abs(m - n) > cap) return cap + 1;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/**
+ * editRatio for threshold checks: exact whenever the true ratio could
+ * reach ~0.5 (the cap always covers that distance); pairs further away
+ * get a capped, still-below-threshold score without the full DP.
+ */
+function editRatioCapped(a: string, b: string): number {
+  const max = Math.max(a.length, b.length);
+  if (max === 0) return 1;
+  const cap = Math.floor(max / 2) + 1;
+  return 1 - levenshteinCapped(a, b, cap) / max;
+}
+
+/** Necessary (not sufficient) length condition for editRatio >= ~0.5. */
+function lengthPlausible(a: string, b: string): boolean {
+  const max = Math.max(a.length, b.length);
+  return max === 0 || Math.abs(a.length - b.length) * 2 <= max + 1;
+}
+
+/** Character histogram over UTF-16 code units (matching levenshtein's indexing). */
+function charCounts(s: string): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 0; i < s.length; i++) m.set(s[i], (m.get(s[i]) ?? 0) + 1);
+  return m;
+}
+
+/**
+ * Necessary (not sufficient) histogram condition for editRatio >= ~0.5:
+ * the Levenshtein distance is at least half the L1 distance between the
+ * character histograms, so a pair whose histograms differ by more than
+ * max(len) + 1 can never reach the threshold.
+ */
+function histPlausible(
+  aCounts: Map<string, number>,
+  bCounts: Map<string, number>,
+  lenA: number,
+  lenB: number,
+): boolean {
+  let overlap = 0;
+  for (const [ch, ca] of aCounts) overlap += Math.min(ca, bCounts.get(ch) ?? 0);
+  return lenA + lenB - 2 * overlap <= Math.max(lenA, lenB) + 1;
+}
+
 export interface TitleCandidate {
   song_id: string;
   title: string;
@@ -150,9 +218,45 @@ export interface TitleCandidate {
  * exact = 0.97; otherwise the best Levenshtein ratio across the raw/stripped
  * and folded variants. Only candidates scoring >= 0.5 are returned.
  */
+/** A song title prepared for candidate ranking: normalized/loose
+ * forms and character histograms, computed once and reused across
+ * queries (a review page ranks many titles against the same songs). */
+export interface PreparedTitleEntry {
+  song_id: string;
+  title: string;
+  norm: string;
+  loose: string;
+  counts: Map<string, number>;
+  looseCounts: Map<string, number>;
+}
+
+export function prepareTitleIndex(
+  songs: { song_id: string; title: string; title_normalized: string }[],
+): PreparedTitleEntry[] {
+  return songs.map((s) => {
+    const loose = looseTitleKey(s.title_normalized);
+    return {
+      song_id: s.song_id,
+      title: s.title,
+      norm: s.title_normalized,
+      loose,
+      counts: charCounts(s.title_normalized),
+      looseCounts: charCounts(loose),
+    };
+  });
+}
+
 export function rankTitleCandidates(
   rawTitle: string | null | undefined,
   songs: { song_id: string; title: string; title_normalized: string }[],
+  limit = 3,
+): TitleCandidate[] {
+  return rankTitleCandidatesIndexed(rawTitle, prepareTitleIndex(songs), limit);
+}
+
+export function rankTitleCandidatesIndexed(
+  rawTitle: string | null | undefined,
+  index: PreparedTitleEntry[],
   limit = 3,
 ): TitleCandidate[] {
   if (!rawTitle) return [];
@@ -161,19 +265,42 @@ export function rankTitleCandidates(
   const stripped = normalizeTitle(stripBracketSuffix(rawTitle));
   const loose = looseTitleKey(norm);
   const looseStripped = looseTitleKey(stripped);
+  const normCounts = charCounts(norm);
+  const strippedCounts = charCounts(stripped);
+  const looseCounts = charCounts(loose);
   const out: TitleCandidate[] = [];
-  for (const s of songs) {
-    const sn = s.title_normalized;
+  for (const s of index) {
+    const sn = s.norm;
     let score: number;
     if (sn === norm) score = 1;
     else if (sn === stripped) score = 0.99;
-    else if (looseTitleKey(sn) === loose || looseTitleKey(sn) === looseStripped) score = 0.97;
+    else if (s.loose === loose || s.loose === looseStripped) score = 0.97;
     else {
-      score = Math.max(
-        editRatio(norm, sn),
-        editRatio(stripped, sn),
-        editRatio(loose, looseTitleKey(sn)),
+      // Cheap necessary conditions before any Levenshtein DP: a ratio
+      // >= 0.5 needs |lenA - lenB| <= max(len)/2 (the distance is at
+      // least the length difference) and a character-histogram L1
+      // <= max(len) (the distance is at least half the L1); one char
+      // of slack keeps the rounded-score boundary identical to the
+      // unfiltered version. Songs failing both on every variant can
+      // never be candidates, and the DP itself aborts early above the
+      // threshold distance. This is what keeps a review page full of
+      // unlinked rows (each one re-ranks all ~1,500 songs) inside the
+      // Worker CPU budget — without it the list endpoint dies with a
+      // 503 once the queue grows (error 1102, no CORS headers).
+      // The three comparison variants, deduplicated: most titles
+      // have no bracket suffix (stripped === norm) and many have no
+      // foldable characters (loose === norm), so usually only one or
+      // two distinct pairs remain.
+      const pairs: Array<{ q: string; qc: Map<string, number>; t: string; tc: Map<string, number> }> = [
+        { q: norm, qc: normCounts, t: sn, tc: s.counts },
+      ];
+      if (stripped !== norm) pairs.push({ q: stripped, qc: strippedCounts, t: sn, tc: s.counts });
+      if (loose !== norm || s.loose !== sn) pairs.push({ q: loose, qc: looseCounts, t: s.loose, tc: s.looseCounts });
+      const plausible = pairs.some(
+        (p) => lengthPlausible(p.q, p.t) && histPlausible(p.qc, p.tc, p.q.length, p.t.length),
       );
+      if (!plausible) continue;
+      score = Math.max(...pairs.map((p) => editRatioCapped(p.q, p.t)));
     }
     if (score >= 0.5) out.push({ song_id: s.song_id, title: s.title, score: Math.round(score * 1000) / 1000 });
   }

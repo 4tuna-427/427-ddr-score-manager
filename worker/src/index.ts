@@ -17,7 +17,8 @@ import {
   jstDayStartMs,
   computeDayUpdates,
   computeStats,
-  rankTitleCandidates,
+  prepareTitleIndex,
+  rankTitleCandidatesIndexed,
   bestTitleMatch,
   FLARE_ORDER,
   LAMP_RANK,
@@ -208,9 +209,22 @@ async function attachCandidates<T extends Record<string, any>>(db: D1Database, r
     .prepare("SELECT song_id, title, title_normalized, artist FROM songs")
     .all<{ song_id: string; title: string; title_normalized: string; artist: string | null }>();
   const artistById = new Map(allSongs.map((s) => [s.song_id, s.artist]));
-  const byTitle = new Map<string, ReturnType<typeof rankTitleCandidates>>();
+  const titleIndex = prepareTitleIndex(allSongs);
+  const byTitle = new Map<string, ReturnType<typeof rankTitleCandidatesIndexed>>();
+  // Cap the candidate computation per request: every distinct title
+  // re-ranks the whole song list, and a review page can hold ~100
+  // unlinked rows after a bulk import. Rows past the cap (or past the
+  // soft time budget) get no candidates on this load — manual search
+  // still works for them, and they are picked up once earlier rows
+  // are resolved. The budget keeps the endpoint inside the Worker
+  // CPU limit no matter how full the review queue gets.
+  const MAX_CANDIDATE_TITLES = 20;
+  const deadline = Date.now() + 40;
   for (const r of unlinked) {
-    if (!byTitle.has(r.raw_title)) byTitle.set(r.raw_title, rankTitleCandidates(r.raw_title, allSongs, 3));
+    if (byTitle.has(r.raw_title)) continue;
+    if (byTitle.size >= MAX_CANDIDATE_TITLES) break;
+    if (byTitle.size > 0 && Date.now() > deadline) break;
+    byTitle.set(r.raw_title, rankTitleCandidatesIndexed(r.raw_title, titleIndex, 3));
   }
   const songIds = [...new Set([...byTitle.values()].flat().map((cand) => cand.song_id))];
   const chartByKey = new Map<string, string>();
