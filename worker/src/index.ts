@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   applyCorrections,
+  findRedundantCorrections,
   chartId as makeChartId,
   choosePlayer,
   correctOkValue,
@@ -1500,7 +1501,7 @@ app.get("/api/charts/:chart_id/history", async (c) => {
 async function syncMaster(
   db: D1Database,
   url: string,
-): Promise<{ songs: number; charts: number; songWrites: number; chartWrites: number }> {
+): Promise<{ songs: number; charts: number; songWrites: number; chartWrites: number; redundantCorrections: string[] }> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`master fetch failed: ${res.status}`);
   const raw = (await res.json()) as Array<Record<string, any>>;
@@ -1511,11 +1512,17 @@ async function syncMaster(
   // so a sync never reverts a correction. Guarded — the code may be
   // deployed before migration 0010 is applied.
   let effectiveCharts = charts;
+  let redundantCorrections: string[] = [];
   try {
     const { results: corrections } = await db
       .prepare("SELECT chart_id, notes, freeze, shock FROM chart_corrections")
       .all<ChartCorrection>();
-    if (corrections.length > 0) effectiveCharts = applyCorrections(charts, corrections);
+    if (corrections.length > 0) {
+      effectiveCharts = applyCorrections(charts, corrections);
+      // Corrections the master has caught up with can be retired;
+      // reported in the sync result / cron log, never auto-deleted.
+      redundantCorrections = findRedundantCorrections(charts, corrections);
+    }
   } catch {
     // chart_corrections not migrated yet: sync the plain master.
   }
@@ -1569,7 +1576,7 @@ async function syncMaster(
   for (let i = 0; i < stmts.length; i += BATCH) {
     await db.batch(stmts.slice(i, i + BATCH));
   }
-  return { songs: songs.length, charts: effectiveCharts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length };
+  return { songs: songs.length, charts: effectiveCharts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length, redundantCorrections };
 }
 
 async function relinkUnlinkedScores(
@@ -1916,7 +1923,10 @@ const handler: ExportedHandler<Env> = {
             ? await recheckLinkedNeedsReviewScores(env)
             : { resolved: 0 };
           console.log(
-            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites} relinked=${relink.linked} resolved=${recheck.resolved}`,
+            `[cron sync] master songs=${r.songs} charts=${r.charts} writes: songs=${r.songWrites} charts=${r.chartWrites} relinked=${relink.linked} resolved=${recheck.resolved}` +
+              (r.redundantCorrections.length > 0
+                ? ` redundant_corrections=${r.redundantCorrections.join(",")}`
+                : ""),
           );
         })
         .catch((e) => console.error(`[cron sync] failed: ${e instanceof Error ? e.message : String(e)}`)),

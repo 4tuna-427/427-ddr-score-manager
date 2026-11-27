@@ -18,6 +18,7 @@ import {
   correctOkValue,
   impliedMasterNotes,
   applyCorrections,
+  findRedundantCorrections,
   isDetailResult,
   normalizeTitle,
   computeReviewReasons,
@@ -1035,4 +1036,38 @@ test("applyCorrections: sync writes master + corrections, never the plain master
   // An all-null correction row changes nothing.
   const noop = applyCorrections(master, [{ chart_id: "snow|SP|EXPERT", notes: null, freeze: null, shock: null }]);
   assert.deepEqual(noop, master);
+});
+
+test("findRedundantCorrections: only corrections the master has fully caught up with", () => {
+  const master: any[] = [
+    { chart_id: "a|SP|EXPERT", notes: 595, freeze: 6, shock: 0 },
+    { chart_id: "b|SP|EXPERT", notes: 500, freeze: 10, shock: 0 },
+    { chart_id: "c|SP|EXPERT", notes: null, freeze: null, shock: null },
+  ];
+  // Master caught up on every named field -> redundant.
+  assert.deepEqual(
+    findRedundantCorrections(master, [{ chart_id: "a|SP|EXPERT", notes: 595, freeze: null, shock: null }]),
+    ["a|SP|EXPERT"],
+  );
+  // One field still differs -> load-bearing, not redundant.
+  assert.deepEqual(
+    findRedundantCorrections(master, [{ chart_id: "a|SP|EXPERT", notes: 595, freeze: 7, shock: null }]),
+    [],
+  );
+  // Master still behind -> not redundant.
+  assert.deepEqual(
+    findRedundantCorrections(master, [{ chart_id: "b|SP|EXPERT", notes: 505, freeze: null, shock: null }]),
+    [],
+  );
+  // Master has no counts yet -> not redundant.
+  assert.deepEqual(
+    findRedundantCorrections(master, [{ chart_id: "c|SP|EXPERT", notes: 100, freeze: null, shock: null }]),
+    [],
+  );
+  // Chart missing from the master -> never flagged.
+  assert.deepEqual(
+    findRedundantCorrections(master, [{ chart_id: "gone|SP|EXPERT", notes: 1, freeze: null, shock: null }]),
+    [],
+  );
+  assert.deepEqual(findRedundantCorrections(master, []), []);
 });

@@ -761,6 +761,30 @@ export function applyCorrections(charts: ChartRow[], corrections: ChartCorrectio
 }
 
 /**
+ * Chart ids whose correction the delivered master has caught up with:
+ * every field the correction names already equals the master value,
+ * so the correction changes nothing and can be retired (the pipeline
+ * override or the upstream wiki now carries the fix — the correction's
+ * lifecycle is register in-app → promote to the pipeline → retire
+ * here). Detection only: retiring stays a deliberate DELETE, because
+ * a correction that still differs from the master is load-bearing.
+ * Charts missing from the master are never flagged (their correction
+ * is moot for a different reason, not redundant).
+ */
+export function findRedundantCorrections(masterCharts: ChartRow[], corrections: ChartCorrection[]): string[] {
+  if (corrections.length === 0) return [];
+  const byId = new Map(masterCharts.map((ch) => [ch.chart_id, ch]));
+  const out: string[] = [];
+  for (const k of corrections) {
+    const m = byId.get(k.chart_id);
+    if (!m) continue;
+    const fields = ["notes", "freeze", "shock"] as const;
+    if (fields.every((f) => k[f] == null || m[f] === k[f])) out.push(k.chart_id);
+  }
+  return out;
+}
+
+/**
  * Validate a client-supplied capture time (ISO string from EXIF etc.).
  * Returns epoch ms (the unit scores.played_at uses), or null when
  * unusable: unparseable, before 2010, or more than 1 hour in the future

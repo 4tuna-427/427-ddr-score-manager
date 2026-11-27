@@ -160,6 +160,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 
 ### マスタ修正（chart_corrections、migration 0010）
 - 配信マスタのノーツ数が実譜面と違う場合の恒久修正。D1 の charts を直接直しても毎日の同期で戻るため、修正は `chart_corrections` テーブルに保持し、`POST /api/admin/sync` と Cron 同期が毎回「マスタ＋修正」の実効値を書き込む（`applyCorrections`）。NULL のフィールドは修正なし。
+- ライフサイクル: アプリで暫定修正 → パイプライン（notecount_overrides.json）へ昇格 → 配信マスタが追いついたら D1 側を畳む。同期のたびに「修正の全項目がマスタと一致する譜面」を `redundantCorrections` として検出する（`findRedundantCorrections`）ので、畳み時はそれを見て DELETE する。マスタに無い譜面や、まだ値が違う修正は検出対象外。
 - `judge_sum_mismatch` の detail には、余り（read > expected）の場合のみ `implied_notes`（このプレイが証明する正しい notes）が付く。不足は同時フリーズで説明できるため付けない。
 
 ### POST /api/scores/:id/correct-master-notes  `{reason?: string}`
@@ -190,7 +191,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - v1形式（levels が `single_*_level` 等のフラット）と v2形式（`levels`/`notecounts` オブジェクト）の両方を自動判別して upsert する。v1 で notecounts が無い場合、既存 charts の notes/freeze/shock は上書きしない（保持）。
 - 差分があった行だけを書き込む（`planSync`）。マスタが持たない項目（null）は変更とみなさない。
 - `chart_corrections`（migration 0010）の修正はマスタへ重ねてから差分判定する。実効値で同期するため、登録済みの修正が同期で配信値に戻ることはない。
-- レスポンス: `{songs: n, charts: m, songWrites: w1, chartWrites: w2}`（songs/charts はマスタ全体の件数、Writes は実際に書き込んだ行数）
+- レスポンス: `{songs: n, charts: m, songWrites: w1, chartWrites: w2, redundantCorrections: [chart_id...]}`（songs/charts はマスタ全体の件数、Writes は実際に書き込んだ行数。redundantCorrections は配信マスタが追いついて不要になった修正の一覧＝畳める修正。Cron 同期でも該当がある場合のみログに `redundant_corrections=` として残る。自動削除はしない）
 - 自動同期: Worker の Cron Trigger（毎日 04:00 JST、wrangler.toml の `[triggers]`）が同じ処理を実行する。失敗時は Worker のログに `[cron sync] failed:` が残る（手動エンドポイントはフォールバック）。
 
 ## Gemini 連携
