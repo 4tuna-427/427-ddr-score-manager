@@ -16,6 +16,8 @@ import {
   judgeSumCheck,
   judgeSumDeficitToLearn,
   correctOkValue,
+  impliedMasterNotes,
+  applyCorrections,
   isDetailResult,
   normalizeTitle,
   computeReviewReasons,
@@ -971,4 +973,66 @@ test("isDetailResult: consistent data overrides the tab; absence signature is th
   // Partial read (EX + combo present, some judgments missing) still counts
   // as a detail screen and goes through the normal review flow.
   assert.equal(isDetailResult({}, { ...empty, ex_score: 500, max_combo: 121, marvelous: 100 }), true);
+});
+
+test("impliedMasterNotes: a surplus play proves the master notes value", () => {
+  // Snow Garland Fairy ESP: master says 593/6/0, but the game's MAX
+  // COMBO is 595 and a verified play's judge sum is 595 with ok = 6
+  // (all freezes held, no shocks): 595 - 6 - 0 + 6 + 0 = 595.
+  const chart: any = { notes: 593, freeze: 6, shock: 0, level: 17, max_ex: 1797, judge_sum_deficit: null };
+  const play: any = { marvelous: 545, perfect: 40, great: 8, good: 1, miss: 1, ok: 6, ex_score: 1741, score: 978350, level: 17, max_combo: null };
+  assert.equal(impliedMasterNotes(play, chart), 595);
+
+  // The reason detail carries implied_notes for the surplus case only.
+  const ev = evaluateScore(play, chart, { songLinked: true, chartLinked: true });
+  assert.equal(ev.ex_check, "match");
+  assert.deepEqual(ev.reasons.map((r) => r.code), ["judge_sum_mismatch"]);
+  assert.deepEqual(ev.reasons[0].detail, { judge_sum: 595, expected: 593, implied_notes: 595 });
+
+  // A shortfall (Blew My Mind: freeze pairs) yields a value BELOW the
+  // master notes, and the detail offers nothing — pairs explain it.
+  const blewChart: any = { notes: 665, freeze: 46, shock: 2, level: 18, max_ex: 2139, judge_sum_deficit: null };
+  const blewPlay: any = { marvelous: 600, perfect: 50, great: 10, good: 3, miss: 3, ok: 46, ex_score: 2014, score: 923710, level: 18, max_combo: null };
+  assert.equal(impliedMasterNotes(blewPlay, blewChart), 664);
+  const blewEv = evaluateScore(blewPlay, blewChart, { songLinked: true, chartLinked: true });
+  assert.deepEqual(blewEv.reasons.find((r) => r.code === "judge_sum_mismatch")?.detail, {
+    judge_sum: 666,
+    expected: 667,
+  });
+
+  // A learned deficit P is part of the identity: implied accounts for it.
+  const learnedChart: any = { ...chart, judge_sum_deficit: 2 };
+  assert.equal(impliedMasterNotes(play, learnedChart), 597);
+
+  // Identity not applicable: no freeze count / no ok read.
+  assert.equal(impliedMasterNotes(play, { ...chart, freeze: null }), null);
+  assert.equal(impliedMasterNotes({ ...play, ok: null }, chart), null);
+  assert.equal(impliedMasterNotes(play, null), null);
+});
+
+test("applyCorrections: sync writes master + corrections, never the plain master", () => {
+  const master: any[] = [
+    { chart_id: "snow|SP|EXPERT", song_id: "snow", play_style: "SP", difficulty: "EXPERT", level: 17, notes: 593, freeze: 6, shock: 0, max_ex: 1797, judge_sum_deficit: null },
+    { chart_id: "other|SP|EXPERT", song_id: "other", play_style: "SP", difficulty: "EXPERT", level: 16, notes: 500, freeze: 10, shock: 0, max_ex: 1530, judge_sum_deficit: null },
+  ];
+  // No corrections: the master passes through untouched.
+  assert.deepEqual(applyCorrections(master, []), master);
+
+  const corrected = applyCorrections(master, [{ chart_id: "snow|SP|EXPERT", notes: 595, freeze: null, shock: null }]);
+  // notes overridden, max_ex recomputed with the expandMaster rule.
+  assert.equal(corrected[0].notes, 595);
+  assert.equal(corrected[0].freeze, 6);
+  assert.equal(corrected[0].max_ex, 1803);
+  // Unmatched charts are untouched.
+  assert.deepEqual(corrected[1], master[1]);
+
+  // A freeze-only override recomputes max_ex from the effective counts.
+  const fz = applyCorrections(master, [{ chart_id: "other|SP|EXPERT", notes: null, freeze: 12, shock: null }]);
+  assert.equal(fz[1].notes, 500);
+  assert.equal(fz[1].freeze, 12);
+  assert.equal(fz[1].max_ex, 1536);
+
+  // An all-null correction row changes nothing.
+  const noop = applyCorrections(master, [{ chart_id: "snow|SP|EXPERT", notes: null, freeze: null, shock: null }]);
+  assert.deepEqual(noop, master);
 });

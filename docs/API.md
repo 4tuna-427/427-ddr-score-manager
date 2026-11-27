@@ -158,6 +158,24 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 ### POST /api/scores/:id/link  `{chart_id}`
 - chart を紐付け直し、検算を再実行する。
 
+### マスタ修正（chart_corrections、migration 0010）
+- 配信マスタのノーツ数が実譜面と違う場合の恒久修正。D1 の charts を直接直しても毎日の同期で戻るため、修正は `chart_corrections` テーブルに保持し、`POST /api/admin/sync` と Cron 同期が毎回「マスタ＋修正」の実効値を書き込む（`applyCorrections`）。NULL のフィールドは修正なし。
+- `judge_sum_mismatch` の detail には、余り（read > expected）の場合のみ `implied_notes`（このプレイが証明する正しい notes）が付く。不足は同時フリーズで説明できるため付けない。
+
+### POST /api/scores/:id/correct-master-notes  `{reason?: string}`
+- 要確認プレイからワンタップでマスタ notes を修正する。条件: EX検算が match、理由が judge_sum_mismatch を含む、恒等式から逆算した notes（`impliedMasterNotes`）が現在のマスタ notes より大きい（余り）。不足の場合は 400（同時フリーズ学習の担当）。
+- 修正を `chart_corrections` に登録し、charts 行へ即時反映（max_ex 再計算）、その譜面の要確認プレイを再チェックする。→ `{chart_id, notes, max_ex, resolved}`
+
+### GET /api/corrections
+- 登録済みのマスタ修正一覧（曲名・譜面情報付き、updated_at 降順）。→ `{corrections: [...]}`
+
+### PUT /api/charts/:chart_id/correction  `{notes?, freeze?, shock?, reason?}`
+- 明示値で修正を登録・更新する。各カウントは「非負整数＝上書き、null＝その項目の修正を解除、キー無し＝変更なし」。全項目が null になれば行ごと削除。
+- 登録後にマスタ同期を実行して charts 行を「マスタ＋修正」で再導出する（取得失敗時はマージ値を直接反映し `synced: false`）。その譜面の要確認プレイも再チェックする。→ `{chart_id, correction, synced, resolved}`
+
+### DELETE /api/charts/:chart_id/correction
+- 修正を削除し、マスタ同期で charts 行を配信値に戻す（同期失敗時は次回同期で戻る）。→ `{chart_id, correction: null, synced, resolved}`
+
 ### GET /api/songs/by-phash?phash=...&max_distance=20&limit=5
 → ジャケット pHash（16桁hex＝64bit、`songs.phash_8`）にハミング距離が近い曲を返す `{items: [{song_id, title, artist, distance, charts}]}`（距離昇順、最大5件）。`phash` が16桁hexでない場合は 400。
 - **精度の注意（Phase 2.4 検証結果）**: Phase 0 の実写真6枚で検証したところ、正しい曲までの距離は 18〜36（順位 2〜1271位）で、無関係の曲が 16〜20 で一致することもあった。画面写真のモアレ・反射・斜め撮影と `jacket_bbox` の精度が支配的で、**このエンドポイントの候補を自動リンクに使ってはいけない**。候補提示として使う場合も、距離の小ささは一致の証明にならない。ブラウザ側の計算は `web/src/lib/phash.ts`（標準的な imagehash 式 pHash。TS 実装と Python 参照実装の一致は 6 枚全てで確認済み）。
@@ -171,6 +189,7 @@ CREATE INDEX idx_scores_played ON scores(played_at);
 - 既定URLは環境変数 `MASTER_URL`（無ければ https://4tuna-427.github.io/ddr-song-data/songs.json ）
 - v1形式（levels が `single_*_level` 等のフラット）と v2形式（`levels`/`notecounts` オブジェクト）の両方を自動判別して upsert する。v1 で notecounts が無い場合、既存 charts の notes/freeze/shock は上書きしない（保持）。
 - 差分があった行だけを書き込む（`planSync`）。マスタが持たない項目（null）は変更とみなさない。
+- `chart_corrections`（migration 0010）の修正はマスタへ重ねてから差分判定する。実効値で同期するため、登録済みの修正が同期で配信値に戻ることはない。
 - レスポンス: `{songs: n, charts: m, songWrites: w1, chartWrites: w2}`（songs/charts はマスタ全体の件数、Writes は実際に書き込んだ行数）
 - 自動同期: Worker の Cron Trigger（毎日 04:00 JST、wrangler.toml の `[triggers]`）が同じ処理を実行する。失敗時は Worker のログに `[cron sync] failed:` が残る（手動エンドポイントはフォールバック）。
 

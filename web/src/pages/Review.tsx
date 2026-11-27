@@ -8,6 +8,7 @@ import {
   patchScore,
   relinkScores,
   resolveReview,
+  correctMasterNotes,
   searchSongs,
   selectPlayer,
   type Score,
@@ -154,6 +155,15 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
   const calcEx = typeof exMismatch?.detail?.calc_ex === 'number' ? exMismatch.detail.calc_ex : null
   const levelMismatch = reasons.find((r) => r.code === 'level_mismatch')
   const masterLevel = typeof levelMismatch?.detail?.master_level === 'number' ? levelMismatch.detail.master_level : null
+  // Surplus judge-sum mismatch: the server attaches the master notes
+  // value this play proves (implied_notes) — present only when the
+  // read exceeds the identity and the EX cross-check matched, i.e.
+  // when correcting the master from this play is sound.
+  const judgeMismatch = reasons.find((r) => r.code === 'judge_sum_mismatch')
+  const impliedNotes =
+    score.ex_check === 'match' && typeof judgeMismatch?.detail?.implied_notes === 'number'
+      ? judgeMismatch.detail.implied_notes
+      : null
   const isUnlinkedSong = reasons.some((r) => r.code === 'unlinked_song')
   const isDiffMismatch = reasons.some((r) => r.code === 'difficulty_mismatch')
   const isPlayerUnresolved = reasons.some((r) => r.code === 'player_unresolved')
@@ -353,6 +363,15 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
 
         {masterRelated && (
           <>
+            {impliedNotes != null && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runAction(() => correctMasterNotes(score.id))}
+              >
+                マスタ notes を {impliedNotes} に修正
+              </button>
+            )}
             <button type="button" disabled={busy} onClick={openMasterIssue}>
               マスタ修正を報告 (GitHub)
             </button>

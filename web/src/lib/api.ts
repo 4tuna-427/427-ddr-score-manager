@@ -226,6 +226,12 @@ export function deleteScore(id: string): Promise<{ ok: boolean }> {
   return request(`/api/scores/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+export function correctMasterNotes(
+  id: string,
+): Promise<{ chart_id: string; notes: number; max_ex: number | null; resolved: number }> {
+  return request(`/api/scores/${encodeURIComponent(id)}/correct-master-notes`, { method: 'POST' })
+}
+
 export function relinkScores(): Promise<{
   checked: number
   linked: number

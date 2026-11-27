@@ -233,6 +233,28 @@ if (!chart || chart.notes == null || chart.freeze == null || p.ok == null) retur
 return chart.notes + chart.freeze + (chart.shock ?? 0) - p.ok - (chart.judge_sum_deficit ?? 0);
 }
 
+/**
+ * The master notes value that would make this play's judge-sum identity
+ * hold exactly: judgeSum = notes + freeze + shock − ok − P, solved for
+ * notes. Returns null when the identity cannot be applied (no master
+ * notes, or freeze / ok unknown) or the result is not positive.
+ *
+ * Only a result ABOVE the stored master notes is evidence against the
+ * master: a shortfall can always be explained by simultaneous-freeze
+ * pairs (see judgeSumDeficitToLearn), while a surplus has no innocent
+ * in-game explanation — either a judgment was misread (ruled out when
+ * the EX cross-check matches) or the master undercounts the chart.
+ * Callers that act on this value must require a surplus.
+ */
+export function impliedMasterNotes(
+p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss" | "ok">,
+chart: ChartLike | null | undefined,
+): number | null {
+if (!chart || chart.notes == null || chart.freeze == null || p.ok == null) return null;
+const implied = judgeSum(p) - chart.freeze - (chart.shock ?? 0) + p.ok + (chart.judge_sum_deficit ?? 0);
+return implied > 0 ? implied : null;
+}
+
 export function judgeSumCheck(
 p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss" | "ok">,
 chart: ChartLike | null | undefined,
@@ -412,11 +434,19 @@ export function computeReviewReasons(
   }
   const jsum = judgeSumCheck(p, chart);
   if (jsum === "check") {
+    const implied = impliedMasterNotes(p, chart);
     reasons.push({
       code: "judge_sum_mismatch",
       detail: {
         judge_sum: judgeSum(p),
         expected: expectedJudgeSum(p, chart) ?? chart?.notes ?? 0,
+        // Surplus only: the notes value this play proves the master
+        // should carry. A shortfall is freeze-pair territory, not a
+        // master error, so no value is offered there. Drives the
+        // one-tap master correction in the review UI.
+        ...(implied != null && chart != null && chart.notes != null && implied > chart.notes
+          ? { implied_notes: implied }
+          : {}),
       },
     });
   }
@@ -697,6 +727,37 @@ export function planSync(
     return false;
   });
   return { songUpserts, chartUpserts };
+}
+
+/** A user-registered correction to a chart's master notecounts (migration 0010). */
+export interface ChartCorrection {
+  chart_id: string;
+  notes: number | null;
+  freeze: number | null;
+  shock: number | null;
+}
+
+/**
+ * Overlay user-registered master corrections onto expanded master
+ * charts, producing the effective values a sync must write. The
+ * delivered master can carry a wrong notecount (e.g. a wiki miscount);
+ * the correction lives in D1 (chart_corrections) and is re-applied on
+ * every sync, so the daily cron never reverts it. max_ex is recomputed
+ * with the same rule expandMaster uses. judge_sum_deficit is a learned
+ * per-chart value, not master data, and is never touched here.
+ */
+export function applyCorrections(charts: ChartRow[], corrections: ChartCorrection[]): ChartRow[] {
+  if (corrections.length === 0) return charts;
+  const byId = new Map(corrections.map((k) => [k.chart_id, k]));
+  return charts.map((ch) => {
+    const k = byId.get(ch.chart_id);
+    if (!k || (k.notes == null && k.freeze == null && k.shock == null)) return ch;
+    const notes = k.notes ?? ch.notes;
+    const freeze = k.freeze ?? ch.freeze;
+    const shock = k.shock ?? ch.shock;
+    const max_ex = notes != null && freeze != null ? (notes + freeze + (shock ?? 0)) * 3 : ch.max_ex;
+    return { ...ch, notes, freeze, shock, max_ex };
+  });
 }
 
 /**

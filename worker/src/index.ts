@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
+  applyCorrections,
   chartId as makeChartId,
   choosePlayer,
   correctOkValue,
   evaluateScore,
   isDetailResult,
+  impliedMasterNotes,
   expandMaster,
   planSync,
   normalizeTitle,
@@ -27,6 +29,7 @@ import {
   songCategory,
   CATEGORY_VERSION_SPELLINGS,
   type SongCategory,
+  type ChartCorrection,
   type ChartRow,
   type Extraction,
   type PlayerExtraction,
@@ -1503,6 +1506,19 @@ async function syncMaster(
   const raw = (await res.json()) as Array<Record<string, any>>;
   if (!Array.isArray(raw)) throw new Error("master is not an array");
   const { songs, charts } = expandMaster(raw);
+  // User-registered master corrections (migration 0010) overlay the
+  // delivered master: planSync diffs and writes the effective values,
+  // so a sync never reverts a correction. Guarded — the code may be
+  // deployed before migration 0010 is applied.
+  let effectiveCharts = charts;
+  try {
+    const { results: corrections } = await db
+      .prepare("SELECT chart_id, notes, freeze, shock FROM chart_corrections")
+      .all<ChartCorrection>();
+    if (corrections.length > 0) effectiveCharts = applyCorrections(charts, corrections);
+  } catch {
+    // chart_corrections not migrated yet: sync the plain master.
+  }
   const now = Date.now();
 
   // Only write rows that actually changed (see planSync in lib.ts).
@@ -1514,7 +1530,7 @@ async function syncMaster(
   const { results: existingCharts } = await db
     .prepare("SELECT chart_id, song_id, play_style, difficulty, level, notes, freeze, shock, max_ex, judge_sum_deficit FROM charts")
     .all<ChartRow>();
-  const { songUpserts, chartUpserts } = planSync(existingSongs, existingCharts, songs, charts);
+  const { songUpserts, chartUpserts } = planSync(existingSongs, existingCharts, songs, effectiveCharts);
 
   const songStmt = db.prepare(
     `INSERT INTO songs (song_id, title, title_normalized, artist, version, bpm, phash_8, phash_16, availability, deleted_at, has_jacket, updated_at)
@@ -1553,7 +1569,7 @@ async function syncMaster(
   for (let i = 0; i < stmts.length; i += BATCH) {
     await db.batch(stmts.slice(i, i + BATCH));
   }
-  return { songs: songs.length, charts: charts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length };
+  return { songs: songs.length, charts: effectiveCharts.length, songWrites: songUpserts.length, chartWrites: chartUpserts.length };
 }
 
 async function relinkUnlinkedScores(
@@ -1635,11 +1651,232 @@ async function recheckLinkedNeedsReviewScores(
   return { rechecked: rows.length, resolved };
 }
 
+/**
+ * Recheck the flagged plays of a single chart after its master values
+ * changed (a correction was registered or cleared). Mirrors the update
+ * logic of recheckLinkedNeedsReviewScores, minus deficit learning: a
+ * corrected chart must satisfy the identity exactly, so anything still
+ * mismatched stays flagged for a human look.
+ */
+async function recheckChartScores(env: Env, chartId: string): Promise<number> {
+  const chart = await getChart(env.DB, chartId);
+  if (!chart) return 0;
+  const { results: rows } = await env.DB
+    .prepare("SELECT * FROM scores WHERE chart_id = ? AND needs_review = 1")
+    .bind(chartId)
+    .all<Record<string, any>>();
+  let resolved = 0;
+  for (const row of rows) {
+    const playerUnresolved = isPlayerUnresolved(row, env.MY_DANCER_NAME);
+    const checks = recomputeChecks(row, chart, { playerUnresolved });
+    if (checks.needs_review === 0) {
+      await env.DB
+        .prepare(
+          `UPDATE scores SET ex_check = ?, judge_sum_check = ?, needs_review = 0,
+           review_status = NULL, has_review_image = 0 WHERE id = ?`,
+        )
+        .bind(checks.ex_check, checks.judge_sum_check, row.id)
+        .run();
+      await deleteReviewImage(env, String(row.id));
+      resolved += 1;
+    } else if (checks.ex_check !== row.ex_check || checks.judge_sum_check !== row.judge_sum_check) {
+      await env.DB
+        .prepare("UPDATE scores SET ex_check = ?, judge_sum_check = ? WHERE id = ?")
+        .bind(checks.ex_check, checks.judge_sum_check, row.id)
+        .run();
+    }
+  }
+  return resolved;
+}
+
 // ---- POST /api/admin/relink: re-run title matching & recheck linked review scores ----
 app.post("/api/admin/relink", async (c) => {
   const relink = await relinkUnlinkedScores(c.env);
   const recheck = await recheckLinkedNeedsReviewScores(c.env);
   return c.json({ ...relink, ...recheck });
+});
+
+// ---- master corrections (migration 0010) ----
+// The delivered master can carry a wrong notecount (Snow Garland Fairy
+// ESP: the wiki says 593 notes, the game's own MAX COMBO and a verified
+// play prove 595). Corrections live in chart_corrections; syncMaster
+// overlays them on every sync, so they survive the daily cron.
+
+// ---- POST /api/scores/:id/correct-master-notes ----
+// One-tap correction from a flagged play. A judge-sum SURPLUS with a
+// matching EX cross-check proves the master notes value
+// (impliedMasterNotes), so register it, apply it to the chart row and
+// recheck the chart's flagged plays. Shortfalls are refused: freeze
+// pairs explain them and are learned separately, never "corrected".
+app.post("/api/scores/:id/correct-master-notes", async (c) => {
+  const id = c.req.param("id");
+  const row = await c.env.DB
+    .prepare("SELECT * FROM scores WHERE id = ?")
+    .bind(id)
+    .first<Record<string, any>>();
+  if (!row) return c.json({ error: "score not found" }, 404);
+  if (!row.chart_id) return c.json({ error: "score is not linked to a chart" }, 400);
+  const chart = await getChart(c.env.DB, String(row.chart_id));
+  if (!chart) return c.json({ error: "chart not found" }, 400);
+  const playerUnresolved = isPlayerUnresolved(row, c.env.MY_DANCER_NAME);
+  const ev = evaluateScore(row as any, chart, {
+    songLinked: !!row.song_id,
+    chartLinked: true,
+    playerUnresolved,
+  });
+  if (ev.ex_check !== "match") {
+    return c.json({ error: "EX cross-check does not match; the read itself is suspect" }, 400);
+  }
+  if (!ev.reasons.some((r) => r.code === "judge_sum_mismatch")) {
+    return c.json({ error: "no judge-sum mismatch on this score" }, 400);
+  }
+  const implied = impliedMasterNotes(row as any, chart);
+  if (implied == null || chart.notes == null || implied <= chart.notes) {
+    return c.json({ error: "a judge-sum shortfall cannot correct the master (freeze pairs explain it)" }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+  const reason =
+    typeof body.reason === "string" && body.reason ? body.reason : `プレイ ${id} の判定合計（余り）から逆算`;
+  const now = Date.now();
+  try {
+    await c.env.DB
+      .prepare(
+        `INSERT INTO chart_corrections (chart_id, notes, reason, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(chart_id) DO UPDATE SET notes = excluded.notes,
+           reason = excluded.reason, updated_at = excluded.updated_at`,
+      )
+      .bind(chart.chart_id, implied, reason, now, now)
+      .run();
+  } catch {
+    return c.json({ error: "chart_corrections table is missing — apply migration 0010 first" }, 500);
+  }
+  const maxEx = chart.freeze != null ? (implied + chart.freeze + (chart.shock ?? 0)) * 3 : null;
+  await c.env.DB
+    .prepare("UPDATE charts SET notes = ?, max_ex = ? WHERE chart_id = ?")
+    .bind(implied, maxEx, chart.chart_id)
+    .run();
+  const resolved = await recheckChartScores(c.env, chart.chart_id);
+  return c.json({ chart_id: chart.chart_id, notes: implied, max_ex: maxEx, resolved });
+});
+
+// ---- GET /api/corrections: list registered master corrections ----
+app.get("/api/corrections", async (c) => {
+  try {
+    const { results } = await c.env.DB
+      .prepare(
+        `SELECT cc.chart_id, cc.notes, cc.freeze, cc.shock, cc.reason, cc.created_at, cc.updated_at,
+                ch.play_style, ch.difficulty, ch.level, s.title AS song_title
+         FROM chart_corrections cc
+         LEFT JOIN charts ch ON ch.chart_id = cc.chart_id
+         LEFT JOIN songs s ON s.song_id = ch.song_id
+         ORDER BY cc.updated_at DESC`,
+      )
+      .all();
+    return c.json({ corrections: results });
+  } catch {
+    return c.json({ corrections: [] });
+  }
+});
+
+// ---- PUT /api/charts/:chart_id/correction ----
+// Register or update an explicit correction. Body fields notes /
+// freeze / shock: a non-negative integer sets that field's override,
+// null clears it, an absent key leaves it unchanged. The chart row is
+// then re-derived from the delivered master plus corrections via a
+// master sync; when the fetch is unavailable the merged values are
+// applied directly (a cleared field then reverts at the next sync).
+app.put("/api/charts/:chart_id/correction", async (c) => {
+  const chartId = c.req.param("chart_id");
+  const chart = await getChart(c.env.DB, chartId);
+  if (!chart) return c.json({ error: "chart not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const FIELDS = ["notes", "freeze", "shock"] as const;
+  type CountField = (typeof FIELDS)[number];
+  const updates = new Map<CountField, number | null>();
+  for (const f of FIELDS) {
+    if (!(f in body)) continue;
+    const v = body[f];
+    if (v === null) updates.set(f, null);
+    else if (typeof v === "number" && Number.isInteger(v) && v >= 0) updates.set(f, v);
+    else return c.json({ error: `${f} must be a non-negative integer or null` }, 400);
+  }
+  const reason = typeof body.reason === "string" ? body.reason : undefined;
+  if (updates.size === 0 && reason === undefined) {
+    return c.json({ error: "nothing to update" }, 400);
+  }
+  let existing: { notes: number | null; freeze: number | null; shock: number | null; reason: string | null } | null = null;
+  try {
+    existing = await c.env.DB
+      .prepare("SELECT notes, freeze, shock, reason FROM chart_corrections WHERE chart_id = ?")
+      .bind(chartId)
+      .first();
+  } catch {
+    return c.json({ error: "chart_corrections table is missing — apply migration 0010 first" }, 500);
+  }
+  const merged: Record<CountField, number | null> = {
+    notes: updates.has("notes") ? updates.get("notes")! : existing?.notes ?? null,
+    freeze: updates.has("freeze") ? updates.get("freeze")! : existing?.freeze ?? null,
+    shock: updates.has("shock") ? updates.get("shock")! : existing?.shock ?? null,
+  };
+  const mergedReason = reason !== undefined ? reason : existing?.reason ?? null;
+  const now = Date.now();
+  const empty = merged.notes == null && merged.freeze == null && merged.shock == null;
+  if (empty) {
+    await c.env.DB.prepare("DELETE FROM chart_corrections WHERE chart_id = ?").bind(chartId).run();
+  } else {
+    await c.env.DB
+      .prepare(
+        `INSERT INTO chart_corrections (chart_id, notes, freeze, shock, reason, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(chart_id) DO UPDATE SET notes = excluded.notes, freeze = excluded.freeze,
+           shock = excluded.shock, reason = excluded.reason, updated_at = excluded.updated_at`,
+      )
+      .bind(chartId, merged.notes, merged.freeze, merged.shock, mergedReason, now, now)
+      .run();
+  }
+  let synced = true;
+  try {
+    await syncMaster(c.env.DB, c.env.MASTER_URL || DEFAULT_MASTER_URL);
+  } catch {
+    synced = false;
+    // Fallback: apply the merged overrides onto the current chart row.
+    const notes = merged.notes ?? chart.notes;
+    const freeze = merged.freeze ?? chart.freeze;
+    const shock = merged.shock ?? chart.shock;
+    const maxEx = notes != null && freeze != null ? (notes + freeze + (shock ?? 0)) * 3 : chart.max_ex;
+    await c.env.DB
+      .prepare("UPDATE charts SET notes = ?, freeze = ?, shock = ?, max_ex = ? WHERE chart_id = ?")
+      .bind(notes, freeze, shock, maxEx, chartId)
+      .run();
+  }
+  const resolved = await recheckChartScores(c.env, chartId);
+  return c.json({
+    chart_id: chartId,
+    correction: empty ? null : { ...merged, reason: mergedReason },
+    synced,
+    resolved,
+  });
+});
+
+// ---- DELETE /api/charts/:chart_id/correction ----
+app.delete("/api/charts/:chart_id/correction", async (c) => {
+  const chartId = c.req.param("chart_id");
+  const chart = await getChart(c.env.DB, chartId);
+  if (!chart) return c.json({ error: "chart not found" }, 404);
+  try {
+    await c.env.DB.prepare("DELETE FROM chart_corrections WHERE chart_id = ?").bind(chartId).run();
+  } catch {
+    return c.json({ error: "chart_corrections table is missing — apply migration 0010 first" }, 500);
+  }
+  let synced = true;
+  try {
+    await syncMaster(c.env.DB, c.env.MASTER_URL || DEFAULT_MASTER_URL);
+  } catch {
+    synced = false; // values revert at the next successful sync
+  }
+  const resolved = await recheckChartScores(c.env, chartId);
+  return c.json({ chart_id: chartId, correction: null, synced, resolved });
 });
 
 // ---- POST /api/admin/sync ----
