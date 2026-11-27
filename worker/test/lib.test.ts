@@ -14,6 +14,7 @@ import {
   expandMaster,
   expandMasterSong,
   judgeSumCheck,
+  judgeSumDeficitToLearn,
   correctOkValue,
   isDetailResult,
   normalizeTitle,
@@ -272,7 +273,7 @@ test("planSync writes only new or actually-changed rows", async () => {
   });
   const chart = (over: Partial<C> = {}): C => ({
     chart_id: "s1-SP-EXPERT", song_id: "s1", play_style: "SP", difficulty: "EXPERT",
-    level: 15, notes: 500, freeze: 10, shock: 0, max_ex: 1530, ...over,
+    level: 15, notes: 500, freeze: 10, shock: 0, max_ex: 1530, judge_sum_deficit: null, ...over,
   });
 
   // Identical master -> no writes at all.
@@ -861,6 +862,61 @@ test("judgeSumCheck: dropped freezes count as Miss (judgeSum = notes + freeze + 
   assert.equal(judgeSumCheck({ ...play, ok: null }, chart), "check"); // 650 != 649 without the identity
   assert.equal(judgeSumCheck(play, { notes: 649, shock: null }), "check");
   assert.equal(judgeSumCheck({ ...play, miss: 1, ok: null }, { notes: 649, shock: null }), "match");
+});
+
+test("judgeSumDeficitToLearn: simultaneous freezes are learned once, from a proven play only", () => {
+  // Blew My Mind CSP: notes 665, freeze 46, shock 2; one simultaneous
+  // freeze pair held (O.K. 46 = 45 events + 1 avoided shock), so the
+  // read judge sum is 666 against an expected 667.
+  const blewChart: any = { notes: 665, freeze: 46, shock: 2, level: 18, max_ex: 2139 };
+  const blewPlay: any = { marvelous: 600, perfect: 60, great: 4, good: 1, miss: 1, ok: 46, ex_score: 2062, score: 990000, level: 18 };
+  const blewEv = evaluateScore(blewPlay, blewChart, { songLinked: true, chartLinked: true });
+  assert.equal(blewEv.ex_check, "match");
+  assert.deepEqual(blewEv.reasons.map((r) => r.code), ["judge_sum_mismatch"]);
+  assert.equal(judgeSumDeficitToLearn(blewPlay, blewChart, blewEv), 1);
+  // With the learned deficit the same play passes cleanly.
+  const learned = { ...blewChart, judge_sum_deficit: 1 };
+  assert.equal(judgeSumCheck(blewPlay, learned), "match");
+  assert.deepEqual(evaluateScore(blewPlay, learned, { songLinked: true, chartLinked: true }).reasons, []);
+  // And a different shortfall on the learned chart still flags (P is fixed).
+  assert.equal(judgeSumCheck({ ...blewPlay, marvelous: 599 }, learned), "check");
+  // Nothing is learned twice: a known deficit never re-learns.
+  assert.equal(judgeSumDeficitToLearn(blewPlay, learned, blewEv), null);
+
+  // 1116 CSP with the live-master freeze count (14, not 13): the same
+  // read (sum 631, ok 83) teaches P = 2, not 1 — learning follows the
+  // stored chart row instead of a guessed seed.
+  const c1116: any = { notes: 631, freeze: 14, shock: 71, level: 18, max_ex: 2148 };
+  const p1116: any = { marvelous: 550, perfect: 70, great: 8, good: 2, miss: 1, ok: 83, ex_score: 2047, score: 990000, level: 18 };
+  const ev1116 = evaluateScore(p1116, c1116, { songLinked: true, chartLinked: true });
+  assert.equal(ev1116.ex_check, "match");
+  assert.equal(judgeSumDeficitToLearn(p1116, c1116, ev1116), 2);
+
+  // Guards: a surplus can never come from simultaneous freezes.
+  const snowChart: any = { notes: 593, freeze: 6, shock: 0, level: 15, max_ex: 1797 };
+  const snowPlay: any = { marvelous: 500, perfect: 80, great: 10, good: 3, miss: 2, ok: 6, ex_score: 1688, score: 990000, level: 15 };
+  const snowEv = evaluateScore(snowPlay, snowChart, { songLinked: true, chartLinked: true });
+  assert.equal(snowEv.ex_check, "match");
+  assert.equal(judgeSumDeficitToLearn(snowPlay, snowChart, snowEv), null);
+  // EX mismatch: the judgments are not proven consistent, so no learning.
+  const badEx = evaluateScore({ ...blewPlay, ex_score: 2000 }, blewChart, { songLinked: true, chartLinked: true });
+  assert.equal(judgeSumDeficitToLearn({ ...blewPlay, ex_score: 2000 }, blewChart, badEx), null);
+  // Another reason present (level mismatch): no learning.
+  const badLevel = evaluateScore({ ...blewPlay, level: 17 }, blewChart, { songLinked: true, chartLinked: true });
+  assert.equal(badLevel.reasons.length, 2);
+  assert.equal(judgeSumDeficitToLearn({ ...blewPlay, level: 17 }, blewChart, badLevel), null);
+  // Identity not applicable (ok unknown): no learning.
+  const noOk = evaluateScore({ ...blewPlay, ok: null }, blewChart, { songLinked: true, chartLinked: true });
+  assert.equal(judgeSumDeficitToLearn({ ...blewPlay, ok: null }, blewChart, noOk), null);
+});
+
+test("correctOkValue: O.K. correction still proves on a chart with a learned deficit", () => {
+  // Blew My Mind CSP with a learned P = 1; the true ok (46) read as 460.
+  const chart: any = { notes: 665, freeze: 46, shock: 2, level: 18, max_ex: 2139, judge_sum_deficit: 1 };
+  const play: any = { marvelous: 600, perfect: 60, great: 4, good: 1, miss: 1, ok: 460, ex_score: 2062, score: 990000, level: 18 };
+  assert.deepEqual(correctOkValue(play, chart), { ok: 46, corrected: true });
+  // The correct read already proves against the deficit-aware identity.
+  assert.deepEqual(correctOkValue({ ...play, ok: 46 }, chart), { ok: 46, corrected: false });
 });
 
 test("correctOkValue: repairs the O.K. trailing-digit misread only when proven", () => {

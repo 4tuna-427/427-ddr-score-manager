@@ -21,6 +21,7 @@ import {
   computeCloseCalls,
   computeVersus,
   computeReviewReasons,
+  judgeSumDeficitToLearn,
   findPhashCandidates,
   isValidPhash64,
   songCategory,
@@ -124,6 +125,8 @@ interface ChartDbRow {
   freeze: number | null;
   shock: number | null;
   max_ex: number | null;
+  /** Learned simultaneous-freeze deficit P (migration 0009); null = not learned yet. */
+  judge_sum_deficit?: number | null;
 }
 
 interface ScoreFields {
@@ -277,6 +280,7 @@ async function attachReviewDetails<T extends Record<string, any>>(
           shock: r.chart_shock ?? null,
           level: r.chart_level ?? null,
           max_ex: r.chart_max_ex ?? null,
+          judge_sum_deficit: r.chart_judge_sum_deficit ?? null,
         }
       : null;
     const playerUnresolved = r.needs_review === 1 ? isPlayerUnresolved(r, myDancerName) : false;
@@ -351,7 +355,8 @@ async function getScore(db: D1Database, id: string): Promise<Record<string, unkn
       `SELECT s.*, songs.title AS song_title, songs.artist AS artist,
               charts.level AS chart_level, charts.notes AS chart_notes,
               charts.freeze AS chart_freeze, charts.shock AS chart_shock,
-              charts.max_ex AS chart_max_ex
+              charts.max_ex AS chart_max_ex,
+              charts.judge_sum_deficit AS chart_judge_sum_deficit
        FROM scores s
        LEFT JOIN songs ON songs.song_id = s.song_id
        LEFT JOIN charts ON charts.chart_id = s.chart_id
@@ -365,6 +370,37 @@ async function getScore(db: D1Database, id: string): Promise<Record<string, unkn
 async function getChart(db: D1Database, id: string): Promise<ChartDbRow | null> {
   const row = await db.prepare("SELECT * FROM charts WHERE chart_id = ?").bind(id).first<ChartDbRow>();
   return row ?? null;
+}
+
+/**
+ * Learn a chart's simultaneous-freeze deficit from one play, when the
+ * play proves it (see judgeSumDeficitToLearn in lib.ts). Returns the
+ * chart with the learned deficit, or null when nothing is learned. The
+ * UPDATE is guarded by `judge_sum_deficit IS NULL` so a learned value
+ * is never overwritten, and the daily master sync never touches the
+ * column (planSync does not compare it and the sync upsert does not
+ * set it), so learning survives syncs.
+ */
+async function learnJudgeSumDeficit(
+  db: D1Database,
+  player: PlayerExtraction,
+  chart: ChartDbRow,
+  opts: { songLinked: boolean; playerUnresolved?: boolean },
+): Promise<ChartDbRow | null> {
+  const okFix = correctOkValue(player, chart);
+  const effective = okFix.corrected ? { ...player, ok: okFix.ok } : player;
+  const ev = evaluateScore(effective, chart, {
+    songLinked: opts.songLinked,
+    chartLinked: true,
+    playerUnresolved: opts.playerUnresolved,
+  });
+  const deficit = judgeSumDeficitToLearn(effective, chart, ev);
+  if (deficit == null) return null;
+  await db
+    .prepare("UPDATE charts SET judge_sum_deficit = ? WHERE chart_id = ? AND judge_sum_deficit IS NULL")
+    .bind(deficit, chart.chart_id)
+    .run();
+  return { ...chart, judge_sum_deficit: deficit };
 }
 
 /** Recompute checks for an existing score row (after PATCH / link / select-player). */
@@ -440,7 +476,17 @@ app.post("/api/analyze", async (c) => {
     return c.json({ skipped: true, reason: "not_detail_result", song_title: extraction.song_title }, 200);
   }
 
-  const fields = buildFields(extraction, chosen.player, song, chart, chosen.unresolved);
+  let fields = buildFields(extraction, chosen.player, song, chart, chosen.unresolved);
+  // A play that proves a simultaneous-freeze deficit teaches it to the
+  // chart, so this and later plays on the chart stop flagging: re-build
+  // the fields against the learned chart before inserting.
+  if (chart && fields.needs_review === 1) {
+    const learned = await learnJudgeSumDeficit(c.env.DB, chosen.player, chart, {
+      songLinked: !!song,
+      playerUnresolved: chosen.unresolved,
+    });
+    if (learned) fields = buildFields(extraction, chosen.player, song, learned, chosen.unresolved);
+  }
 
   let previous: { score: number; ex_score: number | null; diff: number; played_at: number } | null = null;
   if (fields.chart_id) {
@@ -796,7 +842,8 @@ app.get("/api/scores", async (c) => {
       `SELECT s.*, songs.title AS song_title, songs.artist AS artist,
               charts.level AS chart_level, charts.notes AS chart_notes,
               charts.freeze AS chart_freeze, charts.shock AS chart_shock,
-              charts.max_ex AS chart_max_ex
+              charts.max_ex AS chart_max_ex,
+              charts.judge_sum_deficit AS chart_judge_sum_deficit
        FROM scores s LEFT JOIN songs ON songs.song_id = s.song_id
        LEFT JOIN charts ON charts.chart_id = s.chart_id
        ${where} ORDER BY s.played_at DESC LIMIT ? OFFSET ?`,
@@ -1465,7 +1512,7 @@ async function syncMaster(
     )
     .all<SongRow>();
   const { results: existingCharts } = await db
-    .prepare("SELECT chart_id, song_id, play_style, difficulty, level, notes, freeze, shock, max_ex FROM charts")
+    .prepare("SELECT chart_id, song_id, play_style, difficulty, level, notes, freeze, shock, max_ex, judge_sum_deficit FROM charts")
     .all<ChartRow>();
   const { songUpserts, chartUpserts } = planSync(existingSongs, existingCharts, songs, charts);
 
@@ -1556,9 +1603,17 @@ async function recheckLinkedNeedsReviewScores(
     .all<Record<string, any>>();
   let resolved = 0;
   for (const row of rows) {
-    const chart = await getChart(env.DB, String(row.chart_id));
+    let chart = await getChart(env.DB, String(row.chart_id));
     if (!chart) continue;
     const playerUnresolved = isPlayerUnresolved(row, env.MY_DANCER_NAME);
+    // Flagged plays already in review can teach the deficit too (e.g.
+    // the Blew My Mind / 1116 plays): learn first, then recheck against
+    // the learned chart so they clear in the same pass.
+    const learned = await learnJudgeSumDeficit(env.DB, row as any, chart, {
+      songLinked: !!row.song_id,
+      playerUnresolved,
+    });
+    if (learned) chart = learned;
     const checks = recomputeChecks(row, chart, { playerUnresolved });
     if (checks.needs_review === 0) {
       await env.DB

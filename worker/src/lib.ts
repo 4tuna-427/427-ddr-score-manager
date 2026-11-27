@@ -38,6 +38,15 @@ freeze?: number | null;
 shock: number | null;
 level?: number | null;
 max_ex?: number | null;
+/**
+ * Learned simultaneous-freeze deficit P for this chart (see
+ * judgeSumDeficitToLearn): the number of judge-sum events the chart
+ * always falls short by because same-start freeze groups resolve as
+ * one event in-game while the master counts arrows. Null = not learned
+ * yet; 0 is never stored (a chart with no simultaneous freezes simply
+ * stays null and the plain identity applies).
+ */
+judge_sum_deficit?: number | null;
 }
 
 export type ReviewReasonCode =
@@ -209,6 +218,10 @@ return (p.marvelous?? 0) + (p.perfect?? 0) + (p.great?? 0) + (p.good?? 0) + (p.m
  * On the result screen a dropped freeze (N.G.) and a hit shock arrow both
  * count toward the displayed Miss count, while held freezes and avoided
  * shocks count as O.K., so: judgeSum = notes + freeze + shock - ok.
+ * A chart with a learned simultaneous-freeze deficit P falls short of
+ * that by exactly P on every play (same-start freeze groups resolve as
+ * one event in-game while the master counts arrows), so the learned
+ * deficit is subtracted as well when known.
  * Returns null when the identity cannot be applied (no master notes, or
  * freeze / ok unknown); callers then fall back to the plain notes value.
  */
@@ -217,7 +230,7 @@ p: Pick<PlayerExtraction, "ok">,
 chart: ChartLike | null | undefined,
 ): number | null {
 if (!chart || chart.notes == null || chart.freeze == null || p.ok == null) return null;
-return chart.notes + chart.freeze + (chart.shock ?? 0) - p.ok;
+return chart.notes + chart.freeze + (chart.shock ?? 0) - p.ok - (chart.judge_sum_deficit ?? 0);
 }
 
 export function judgeSumCheck(
@@ -227,6 +240,39 @@ chart: ChartLike | null | undefined,
 if (!chart || chart.notes == null) return "no_master";
 const expected = expectedJudgeSum(p, chart) ?? chart.notes;
 return judgeSum(p) === expected? "match": "check";
+}
+
+/**
+ * The simultaneous-freeze deficit P this play would teach the chart,
+ * or null when nothing may be learned from it.
+ *
+ * A deficit may be learned only when it is a proof, not a guess: the
+ * chart has no deficit stored yet, the judge-sum identity applies, the
+ * read falls short of the expected total by a positive amount (a surplus
+ * can never come from simultaneous freezes — pairs only subtract), the
+ * EX cross-check matches (so the judgments are internally consistent),
+ * and the judge-sum mismatch is the play's ONLY review reason. A play
+ * that also fails another check (EX, level, ok/combo limits) may be a
+ * misread, so it teaches nothing and stays flagged.
+ *
+ * P is a fixed per-chart constant (the sum of group_size - 1 over its
+ * same-start freeze groups), so once learned it is never re-learned or
+ * overwritten: a later play with a different shortfall is flagged, not
+ * silently absorbed. Callers persist the returned value on the chart
+ * row and then re-evaluate the play against it.
+ */
+export function judgeSumDeficitToLearn(
+p: Pick<PlayerExtraction, "marvelous" | "perfect" | "great" | "good" | "miss" | "ok" | "ex_score">,
+chart: ChartLike | null | undefined,
+ev: { ex_check: ExCheck; reasons: ReviewReason[] },
+): number | null {
+if (!chart || chart.judge_sum_deficit != null) return null;
+if (ev.ex_check !== "match") return null;
+if (ev.reasons.length !== 1 || ev.reasons[0].code !== "judge_sum_mismatch") return null;
+const expected = expectedJudgeSum(p, chart);
+if (expected == null) return null;
+const deficit = expected - judgeSum(p);
+return deficit > 0 ? deficit : null;
 }
 
 /**
@@ -285,7 +331,10 @@ if (ok == null || ok < 10 || !chart || chart.notes == null || chart.freeze == nu
 const maxOk = chart.freeze + (chart.shock ?? 0);
 const proves = (v: number): boolean => {
   if (v < 0 || v > maxOk) return false;
-  if (judgeSum(p) !== chart.notes! + chart.freeze! + (chart.shock ?? 0) - v) return false;
+  // Deficit-aware: on a chart with a learned simultaneous-freeze
+  // deficit the identity itself is expected - P, so a correct O.K.
+  // read on such a chart still proves (and a wrong one still fails).
+  if (judgeSum(p) !== expectedJudgeSum({ ...p, ok: v }, chart)) return false;
   const calc = calcEx({ marvelous: p.marvelous, perfect: p.perfect, great: p.great, ok: v });
   return calc != null && p.ex_score != null && calc === p.ex_score;
 };
@@ -475,6 +524,8 @@ notes: number | null;
 freeze: number | null;
 shock: number | null;
 max_ex: number | null;
+/** Learned simultaneous-freeze deficit P; null until learned. The master carries no such field, so expandMaster always leaves it null and planSync never compares or overwrites it. */
+judge_sum_deficit: number | null;
 }
 
 function toInt(v: unknown): number | null {
@@ -566,6 +617,7 @@ notes,
 freeze,
 shock,
 max_ex,
+judge_sum_deficit: null,
 });
 }
 } else {
@@ -582,6 +634,7 @@ notes: null,
 freeze: null,
 shock: null,
 max_ex: null,
+judge_sum_deficit: null,
 });
 }
 }
