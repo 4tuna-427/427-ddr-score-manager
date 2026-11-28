@@ -104,3 +104,62 @@ test("GET /api/songs/by-phash returns 400 on invalid phash", async () => {
   );
   assert.equal(res.status, 400);
 });
+
+test("GET /api/scores filters by JST date and validates format", async () => {
+  const capturedBinds: unknown[][] = [];
+  const rows = [
+    { id: "s1", played_at: Date.parse("2026-11-28T00:00:00+09:00"), score: 990000 },
+    { id: "s2", played_at: Date.parse("2026-11-28T23:59:59+09:00"), score: 980000 },
+    { id: "s3", played_at: Date.parse("2026-11-29T00:00:00+09:00"), score: 970000 },
+  ];
+  const mockDb = {
+    prepare(sql: string) {
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...args: unknown[]) {
+          bound = args;
+          capturedBinds.push(args);
+          return stmt;
+        },
+        async first<T>() {
+          if (sql.includes("COUNT(*)")) {
+            const [start, end] = bound as [number, number];
+            const filtered = rows.filter((r) => r.played_at >= start && r.played_at < end);
+            return { n: filtered.length } as T;
+          }
+          return null as T | null;
+        },
+        async all<T>() {
+          const [start, end] = bound as [number, number];
+          const filtered = rows.filter((r) => r.played_at >= start && r.played_at < end);
+          return { results: filtered as T[], success: true, meta: {} };
+        },
+        async run() {
+          return { results: [], success: true, meta: {} };
+        },
+      };
+      return stmt as unknown as D1PreparedStatement;
+    },
+    async batch() { return []; },
+    async exec() { return { count: 0, duration: 0 }; },
+    async dump() { return new ArrayBuffer(0); },
+  } as unknown as D1Database;
+
+  const env: Env = {
+    DB: mockDb,
+    API_TOKEN: "test-token",
+    GEMINI_API_KEY: "test-gemini-key",
+  };
+  const headers = { "X-API-Token": "test-token" };
+
+  const resBad = await app.request("/api/scores?date=2026-11", { headers }, env);
+  assert.equal(resBad.status, 400);
+
+  const resOk = await app.request("/api/scores?date=2026-11-28", { headers }, env);
+  assert.equal(resOk.status, 200);
+  const body = (await resOk.json()) as { items: { id: string }[]; total: number };
+  assert.equal(body.total, 2);
+  assert.deepEqual(body.items.map((x) => x.id), ["s1", "s2"]);
+  assert.equal(capturedBinds[0][0], Date.parse("2026-11-28T00:00:00+09:00"));
+  assert.equal(capturedBinds[0][1], Date.parse("2026-11-29T00:00:00+09:00"));
+});

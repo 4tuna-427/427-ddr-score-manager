@@ -201,11 +201,12 @@ export async function fetchExportBlob(): Promise<Blob> {
   return res.blob()
 }
 
-export function listScores(params: { limit?: number; offset?: number; needsReview?: boolean } = {}): Promise<{ items: Score[]; total: number }> {
+export function listScores(params: { limit?: number; offset?: number; needsReview?: boolean; date?: string } = {}): Promise<{ items: Score[]; total: number }> {
   const q = new URLSearchParams()
   q.set('limit', String(params.limit ?? 50))
   q.set('offset', String(params.offset ?? 0))
   if (params.needsReview) q.set('needs_review', '1')
+  if (params.date) q.set('date', params.date)
   return request(`/api/scores?${q.toString()}`)
 }
 

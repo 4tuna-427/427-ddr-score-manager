@@ -4,28 +4,9 @@ import { useQueue } from '../lib/queue'
 import { ResultCard } from '../components/ResultCard'
 import { DiffBadge } from '../components/DiffBadge'
 import { getApiToken, getLatestDaySummary, type LatestDaySummary } from '../lib/api'
+import { fcLabel, flareBadgeClass, highlightFlareRank } from '../lib/badges'
 import { useDataVersion } from '../lib/dataCache'
-
-type FcKind = 'MFC' | 'PFC' | 'GFC' | 'FC'
-
-function fcLabel(clearLamp: string | null | undefined): FcKind | null {
-  if (!clearLamp) return null
-  const v = clearLamp.trim().toUpperCase()
-  if (v === 'MFC' || v === 'MARVELOUS FULL COMBO') return 'MFC'
-  if (v === 'PFC' || v === 'PERFECT FULL COMBO') return 'PFC'
-  if (v === 'GFC' || v === 'GREAT FULL COMBO') return 'GFC'
-  if (v === 'FC' || v === 'FULL COMBO') return 'FC'
-  return null
-}
-
-function flareBadgeClass(rank: string): string {
-  const r = rank.trim().toUpperCase()
-  if (r === 'EX') return 'flare-ex'
-  if (r === 'IX') return 'flare-ix'
-  if (r === 'VII' || r === 'VIII') return 'flare-high'
-  if (r === 'IV' || r === 'V' || r === 'VI') return 'flare-mid'
-  return 'flare-low'
-}
+import { exRatePercent } from '../lib/stats'
 
 function isImageFile(file: File): boolean {
   if (file.type.startsWith('image/')) return true
@@ -134,34 +115,26 @@ export function HomePage() {
             <ul className="update-list">
               {summary.updates.map((u) => {
                 const fc = fcLabel(u.clear_lamp)
-                const flare = u.flare_rank && u.clear_lamp !== 'FAILED' ? u.flare_rank : null
+                const flare = highlightFlareRank(u.flare_rank, u.clear_lamp)
+                const ex = exRatePercent(u)
                 return (
                   <li key={u.id}>
                     <Link to={`/charts/${encodeURIComponent(u.chart_id || '')}`} className="update-row">
-                      <div className="update-row-top">
-                        <span className="update-title">{u.song_title || u.raw_title || '(曲名不明)'}</span>
-                        <DiffBadge style={u.play_style} difficulty={u.difficulty} level={u.level} />
-                      </div>
-                      <div className="update-row-bottom">
-                        <div className="update-meta">
-                          <span className="update-slot-flare">
-                            {flare && <span className={`badge flare-badge ${flareBadgeClass(flare)}`}>{flare}</span>}
-                          </span>
-                          <span className="update-slot-fc">
-                            {fc && <span className={`badge fc-badge fc-${fc.toLowerCase()}`}>{fc}</span>}
-                          </span>
-                        </div>
-                        <div className="update-score">
-                          <span className="update-score-val">{u.score.toLocaleString()}</span>
-                          <span className="update-score-diff">
-                            {u.is_new ? (
-                              <span className="badge new">新規</span>
-                            ) : (
-                              <span className="diff up">+{u.diff?.toLocaleString()}</span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
+                      <DiffBadge style={u.play_style} difficulty={u.difficulty} level={u.level} />
+                      <span className="update-title">{u.song_title || u.raw_title || '(曲名不明)'}</span>
+                      {fc && <span className={`badge fc-badge fc-${fc.toLowerCase()}`}>{fc}</span>}
+                      {flare && <span className={`badge flare-badge ${flareBadgeClass(flare)}`}>{flare}</span>}
+                      <span className="update-score">
+                        <span className="update-score-val">{u.score.toLocaleString()}</span>
+                        {ex != null && <span className="muted update-score-ex">{ex}%</span>}
+                        <span className="update-score-diff">
+                          {u.is_new ? (
+                            <span className="badge new">新規</span>
+                          ) : (
+                            <span className="diff up">+{u.diff?.toLocaleString()}</span>
+                          )}
+                        </span>
+                      </span>
                     </Link>
                   </li>
                 )

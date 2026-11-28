@@ -4,6 +4,7 @@ import {
   evaluateScore,
   impliedMasterNotes,
   isDetailResult,
+  jstDayStartMs,
   parsePlayedAt,
   validateScorePatch,
   type Extraction,
@@ -299,8 +300,26 @@ scoresRoutes.get("/api/scores", async (c) => {
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "50", 10) || 50, 1), 500);
   const offset = Math.max(parseInt(c.req.query("offset") ?? "0", 10) || 0, 0);
   const nr = c.req.query("needs_review");
-  const where = nr === "0" || nr === "1" ? "WHERE s.needs_review = ?" : "";
-  const binds: unknown[] = nr === "0" || nr === "1" ? [parseInt(nr, 10)] : [];
+  const date = c.req.query("date");
+  const whereClauses: string[] = [];
+  const binds: unknown[] = [];
+  if (nr === "0" || nr === "1") {
+    whereClauses.push("s.needs_review = ?");
+    binds.push(parseInt(nr, 10));
+  }
+  if (date !== undefined && date !== "") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json({ error: "invalid date" }, 400);
+    }
+    const start = jstDayStartMs(date);
+    if (Number.isNaN(start)) {
+      return c.json({ error: "invalid date" }, 400);
+    }
+    const end = start + 86400000;
+    whereClauses.push("s.played_at >= ? AND s.played_at < ?");
+    binds.push(start, end);
+  }
+  const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
   const totalRow = await c.env.DB
     .prepare(`SELECT COUNT(*) AS n FROM scores s ${where}`)
     .bind(...binds)

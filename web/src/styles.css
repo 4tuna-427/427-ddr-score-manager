@@ -172,14 +172,9 @@ input[type="file"] { padding: 8px; width: 100%; }
 .update-list { list-style: none; margin: 8px 0 0; padding: 0; }
 .update-list li { padding: 8px 0; border-top: 1px solid var(--line); }
 .update-list a { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; text-decoration: none; color: inherit; }
-.update-list a.update-row { display: flex; flex-direction: column; gap: 5px; align-items: stretch; }
-.update-row-top { display: flex; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; }
-.update-row-top .update-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.update-row-top .diff-badge { flex: none; }
-.update-row-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.update-meta { display: inline-flex; align-items: center; gap: 6px; min-height: 20px; }
-.update-slot-flare { display: inline-flex; align-items: center; min-width: 34px; }
-.update-slot-fc { display: inline-flex; align-items: center; min-width: 44px; }
+.update-list a.update-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 5px; min-width: 0; }
+.update-row .update-title { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.update-row .diff-badge, .update-row .badge { flex: none; white-space: nowrap; }
 .badge.flare-badge { font-weight: 800; }
 .badge.flare-low { background: #fde047; color: #422006; border: 1px solid #eab308; }
 .badge.flare-mid { background: #fb923c; color: #fff; border: 1px solid #ea580c; }
@@ -205,9 +200,10 @@ input[type="file"] { padding: 8px; width: 100%; }
 .badge.fc-gfc { background: #22c55e; color: #fff; }
 .badge.fc-fc { background: #14b8a6; color: #fff; }
 .update-title { font-weight: 700; min-width: 0; }
-.update-score { margin-left: auto; font-variant-numeric: tabular-nums; display: inline-flex; gap: 6px; align-items: baseline; }
-.update-score-val { min-width: 78px; text-align: right; font-weight: 700; }
-.update-score-diff { min-width: 68px; text-align: right; display: inline-flex; justify-content: flex-end; }
+.update-score { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; display: inline-flex; gap: 5px; align-items: baseline; }
+.update-score-val { min-width: 66px; text-align: right; font-weight: 700; }
+.update-score-ex { font-size: 12px; min-width: 40px; text-align: right; }
+.update-score-diff { min-width: 56px; text-align: right; display: inline-flex; justify-content: flex-end; }
 .judge-bar-wrap { margin-top: 10px; }
 .judge-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--track); }
 .judge-bar > div { height: 100%; }
@@ -561,3 +557,22 @@ button.danger { color: var(--danger); border-color: var(--danger); }
 .upload-sheet-settings input[type="checkbox"] {
   min-height: auto; width: 18px; height: 18px;
 }
+
+/* History page: date filter bar, day grouping, and 2-row layout */
+.history-filter-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.history-filter-bar input[type="date"] { flex: 1; min-width: 160px; max-width: 240px; }
+.history-day-card { padding: 12px 14px; }
+.history-day-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+.history-day-head h2 { margin: 0; font-size: 16px; }
+.history-day-count { font-size: 13px; white-space: nowrap; }
+.history-row-right {
+  flex: none; margin-left: auto; white-space: nowrap;
+  display: inline-flex; align-items: baseline; gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.history-row-time { font-size: 12.5px; min-width: 36px; text-align: right; }
