@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { browseCharts, getBrowseFacets, type BrowseItem } from '../lib/api'
 import { fetchUpToCount, getDataVersion, getPageCache, setPageCache, useScrollRestore } from '../lib/dataCache'
 import { exRatePercent } from '../lib/stats'
+import { fcLabel, flareBadgeClass, highlightFlareRank } from '../lib/badges'
 import { fmtDate } from '../components/ScoreList'
 import { DiffBadge } from '../components/DiffBadge'
 import JacketThumb from '../components/JacketThumb'
@@ -27,8 +28,8 @@ const QUICK_LEVELS = [15, 16, 17, 18, 19]
  * saved level and is then remembered like any other change.
  */
 const FILTER_KEY = 'ddr.browseFilters'
-interface SavedFilters { style: string; difficulty: string; level: string; version: string; category: string; played: string; sort: string; dir: string }
-const DEFAULT_FILTERS: SavedFilters = { style: '', difficulty: '', level: '16', version: '', category: '', played: '', sort: 'level', dir: 'asc' }
+interface SavedFilters { style: 'SP' | 'DP'; difficulty: string; level: string; version: string; category: string; played: string; sort: string; dir: string }
+const DEFAULT_FILTERS: SavedFilters = { style: 'SP', difficulty: '', level: '16', version: '', category: '', played: '', sort: 'level', dir: 'asc' }
 
 /** Default direction per sort key; the toggle button flips it. */
 const SORT_DEFAULT_DIR: Record<string, 'asc' | 'desc'> = {
@@ -37,7 +38,14 @@ const SORT_DEFAULT_DIR: Record<string, 'asc' | 'desc'> = {
 function loadFilters(): SavedFilters {
   try {
     const raw = localStorage.getItem(FILTER_KEY)
-    if (raw) return { ...DEFAULT_FILTERS, ...(JSON.parse(raw) as Partial<SavedFilters>) }
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<Omit<SavedFilters, 'style'> & { style?: string }>
+      return {
+        ...DEFAULT_FILTERS,
+        ...parsed,
+        style: parsed.style === 'DP' ? 'DP' : 'SP',
+      }
+    }
   } catch { /* storage unavailable: fall through to defaults */ }
   return DEFAULT_FILTERS
 }
@@ -66,7 +74,7 @@ export function BrowsePage() {
     return c && c.data.filterKey === initKey ? c : undefined
   })
   const [q, setQ] = useState(() => (urlLevel ? '' : initialMatch?.data.q ?? ''))
-  const [style, setStyle] = useState(saved.style)
+  const [style, setStyle] = useState<'SP' | 'DP'>(saved.style)
   const [difficulty, setDifficulty] = useState(saved.difficulty)
   const [level, setLevel] = useState(urlLevel ?? saved.level)
   const [version, setVersion] = useState(saved.version)
@@ -76,9 +84,8 @@ export function BrowsePage() {
   const [dir, setDir] = useState<'asc' | 'desc'>(saved.dir === 'desc' ? 'desc' : 'asc')
   const [showFilters, setShowFilters] = useState(false)
 
-  const activeDetailCount = [style, difficulty, version, category, played].filter(Boolean).length
+  const activeDetailCount = [difficulty, version, category, played].filter(Boolean).length
   const resetDetailFilters = () => {
-    setStyle('')
     setDifficulty('')
     setVersion('')
     setCategory('')
@@ -189,6 +196,38 @@ export function BrowsePage() {
     <div>
       <h1>楽曲・譜面を探す</h1>
       <div className="card form browse-filters">
+        <div className="browse-filter-top">
+          <div className="segmented browse-style-seg" role="group" aria-label="スタイル">
+            {(['SP', 'DP'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={style === s ? 'active' : ''}
+                aria-pressed={style === s}
+                onClick={() => setStyle(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="browse-filter-actions">
+            {activeDetailCount > 0 && (
+              <button type="button" className="browse-filter-reset" onClick={resetDetailFilters}>
+                リセット
+              </button>
+            )}
+            <button
+              type="button"
+              className="browse-filter-toggle"
+              aria-expanded={showFilters}
+              onClick={() => setShowFilters((v) => !v)}
+            >
+              <span>詳細フィルタ</span>
+              {activeDetailCount > 0 && <span className="browse-filter-count">{activeDetailCount}</span>}
+              <span className="browse-filter-chevron" aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
+            </button>
+          </div>
+        </div>
         <div className="level-quick" role="group" aria-label="レベル">
           {QUICK_LEVELS.map((n) => (
             <button
@@ -209,30 +248,8 @@ export function BrowsePage() {
           </button>
         </div>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="曲名で検索" />
-        <div className="browse-filter-bar">
-          <button
-            type="button"
-            className="browse-filter-toggle"
-            aria-expanded={showFilters}
-            onClick={() => setShowFilters((v) => !v)}
-          >
-            <span>詳細フィルタ</span>
-            {activeDetailCount > 0 && <span className="browse-filter-count">{activeDetailCount}</span>}
-            <span className="browse-filter-chevron" aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
-          </button>
-          {activeDetailCount > 0 && (
-            <button type="button" className="browse-filter-reset" onClick={resetDetailFilters}>
-              リセット
-            </button>
-          )}
-        </div>
         {showFilters && (
           <div className="filter-grid">
-            <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label="スタイル">
-              <option value="">SP/DP すべて</option>
-              <option value="SP">SP</option>
-              <option value="DP">DP</option>
-            </select>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} aria-label="難易度">
               <option value="">難易度すべて</option>
               {DIFFS.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -287,42 +304,46 @@ export function BrowsePage() {
       <ul className="score-list">
         {items.map((it) => {
           const rate = it.best_ex_score != null ? exRatePercent({ ex_score: it.best_ex_score, chart_max_ex: it.max_ex }) : null
-          const rankLamp = [it.best_rank, it.best_lamp].filter(Boolean).join(' / ')
-          const exFlare = [
-            rate != null ? `EX ${rate}%` : '',
-            it.best_flare_rank ? `フレア ${it.best_flare_rank}` : '',
-          ].filter(Boolean).join(' ・ ')
+          const fc = fcLabel(it.best_lamp)
+          const flare = highlightFlareRank(it.best_flare_rank, null)
+          const hasMeta = it.notes != null || Boolean(it.bpm) || (it.plays != null && it.last_played != null)
           return (
             <li key={it.chart_id}>
               <Link to={`/charts/${encodeURIComponent(it.chart_id)}`} className="browse-card">
                 <JacketThumb songId={it.song_id} hasJacket={it.has_jacket} size={52} placeholder />
-                <div className="browse-card-main">
-                  <span className="browse-card-title" title={it.title}>{it.title}</span>
+                <div className="browse-card-body">
+                  <div className="browse-card-head">
+                    <span className="browse-card-title" title={it.title}>{it.title}</span>
+                    <span className="browse-card-score-group">
+                      {it.best_score != null ? (
+                        <>
+                          {it.best_rank && <span className="browse-card-rank">{it.best_rank}</span>}
+                          <span className="browse-card-score">{it.best_score.toLocaleString()}</span>
+                          {rate != null && <span className="browse-card-ex muted">{rate}%</span>}
+                        </>
+                      ) : (
+                        <span className="browse-unplayed">未プレイ</span>
+                      )}
+                    </span>
+                  </div>
                   <div className="browse-card-badges">
                     <DiffBadge style={it.play_style} difficulty={it.difficulty} level={it.level} />
                     {it.category && <span className={`badge cat-${it.category.toLowerCase()}`}>{it.category}</span>}
+                    {(fc || flare) && (
+                      <span className="browse-card-status">
+                        {fc && <span className={`badge fc-badge fc-${fc.toLowerCase()}`}>{fc}</span>}
+                        {flare && <span className={`badge flare-badge ${flareBadgeClass(flare)}`}>{flare}</span>}
+                      </span>
+                    )}
                   </div>
-                  {(it.notes != null || it.bpm) && (
+                  {hasMeta && (
                     <div className="browse-card-meta muted">
                       {it.notes != null && <span>{it.notes.toLocaleString()}ノーツ</span>}
                       {it.bpm && <span>BPM {it.bpm}</span>}
+                      {it.plays != null && it.last_played != null && (
+                        <span>{it.plays}プレイ ・ 最終 {fmtDate(it.last_played)}</span>
+                      )}
                     </div>
-                  )}
-                  {it.plays != null && it.last_played != null && (
-                    <div className="browse-card-played muted">
-                      {it.plays}プレイ ・ 最終 {fmtDate(it.last_played)}
-                    </div>
-                  )}
-                </div>
-                <div className="browse-card-right">
-                  {it.best_score != null ? (
-                    <>
-                      <span className="browse-card-score">{it.best_score.toLocaleString()}</span>
-                      {rankLamp && <span className="browse-card-rank muted">{rankLamp}</span>}
-                      {exFlare && <span className="browse-card-sub muted">{exFlare}</span>}
-                    </>
-                  ) : (
-                    <span className="browse-unplayed">未プレイ</span>
                   )}
                 </div>
               </Link>
