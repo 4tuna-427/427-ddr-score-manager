@@ -1930,4 +1930,5 @@ const handler: ExportedHandler<Env> = {
   },
 };
 
+export { app };
 export default handler;

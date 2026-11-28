@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  deleteScore, getScore, linkChart, patchScore, searchSongs, selectPlayer,
-  type Score, type SongSearchItem,
+  deleteScore, getScore, linkChart, patchScore, selectPlayer,
+  type Score,
 } from '../lib/api'
 import { fmtDate } from '../components/ScoreList'
 import { diffLabel } from '../components/DiffBadge'
 import { JudgeBar } from '../components/JudgeBar'
 import { ReviewImage } from '../components/ReviewImage'
 import { ReviewReasonBadges } from '../components/ReviewReasonBadges'
+import { SongSearchPanel } from '../components/SongSearchPanel'
 import { exRatePercent } from '../lib/stats'
 
 const NUM_FIELDS: { key: keyof Score; label: string }[] = [
@@ -39,8 +40,6 @@ export function ScoreDetailPage() {
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [query, setQuery] = useState('')
-  const [songs, setSongs] = useState<SongSearchItem[]>([])
   const [showRelink, setShowRelink] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -92,15 +91,6 @@ export function ScoreDetailPage() {
       setError(e.message)
     } finally {
       setBusy(false)
-    }
-  }
-
-  const onSearch = async () => {
-    try {
-      const r = await searchSongs(query)
-      setSongs(r.items)
-    } catch (e: any) {
-      setError(e.message)
     }
   }
 
@@ -215,26 +205,12 @@ export function ScoreDetailPage() {
               </div>
             </>
           )}
-          <form className="row" onSubmit={(e) => { e.preventDefault(); onSearch() }}>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="曲名で検索" />
-            <button type="submit">検索</button>
-          </form>
-          <ul className="link-list">
-            {songs.map((song) => (
-              <li key={song.song_id}>
-                <div>
-                  <strong>{song.title}</strong> <span className="muted">{song.artist || ''}</span>
-                </div>
-                <div className="row wrap">
-                  {song.charts.map((c) => (
-                    <button key={c.chart_id} type="button" disabled={busy} onClick={() => onLink(c.chart_id)}>
-                      {diffLabel(c.play_style, c.difficulty, c.level)}
-                    </button>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <SongSearchPanel
+            initialQuery={score.raw_title || score.song_title || ''}
+            busy={busy}
+            onSelectChart={(chartId) => void onLink(chartId)}
+            onError={setError}
+          />
         </div>
       )}
 
@@ -244,10 +220,7 @@ export function ScoreDetailPage() {
           {!showRelink && (
             <button
               type="button"
-              onClick={() => {
-                if (!query) setQuery(score.raw_title || score.song_title || '')
-                setShowRelink(true)
-              }}
+              onClick={() => setShowRelink(true)}
             >
               別の曲・譜面に変更
             </button>
