@@ -36,6 +36,15 @@ export function ReviewImage({ scoreId, hasImage, label = '読み取り画像' }:
     }
   }, [scoreId, hasImage])
 
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   if (!hasImage || !url) return null
 
   return (

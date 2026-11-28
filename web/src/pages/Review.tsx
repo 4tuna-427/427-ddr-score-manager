@@ -410,15 +410,15 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
 
       {panel === 'search' && (
         <div className="review-panel">
-          <div className="row">
+          <form className="row" onSubmit={(e) => { e.preventDefault(); doSearch() }}>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="曲名を入力して検索"
               style={{ flex: 1 }}
             />
-            <button type="button" disabled={busy} onClick={doSearch}>検索</button>
-          </div>
+            <button type="submit" disabled={busy}>検索</button>
+          </form>
           {searched && searchResults.length === 0 && (
             <p className="muted">該当する曲が見つかりません。「仮の楽曲を登録」または「マスタ更新待ち」を使えます。</p>
           )}

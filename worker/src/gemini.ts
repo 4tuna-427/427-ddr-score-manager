@@ -46,6 +46,8 @@ export function retryDelaysMs(bulk: boolean): number[] {
 export interface ExtractOptions {
   /** Bulk import mode: reduced in-model retries (see retryDelaysMs). */
   bulk?: boolean;
+  /** Per-request fetch timeout in ms (default 25000). */
+  timeoutMs?: number;
   /** Test hook: replace the retry sleep. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -477,10 +479,14 @@ export async function extractFromImage(
     let res: Response | null = null;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
+        const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+          ? AbortSignal.timeout(opts.timeoutMs ?? 25000)
+          : undefined;
         res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           body: JSON.stringify(body),
+          ...(signal ? { signal } : {}),
         });
       } catch (e) {
         if (attempt === RETRY_DELAYS_MS.length) {

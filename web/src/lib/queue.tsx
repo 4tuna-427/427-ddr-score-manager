@@ -196,12 +196,20 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     const onOnline = () => processNow()
     window.addEventListener('online', onOnline)
     // Pick up items written by the Service Worker (share target) while the app is open.
-    // Poll pending items only; error items wait for online recovery or manual retry.
+    // Poll pending items only while visible; error items wait for online recovery or manual retry.
+    const onVisibility = () => {
+      if (!document.hidden) {
+        refresh().then(() => processNow({ includeErrors: false }))
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     const timer = window.setInterval(() => {
+      if (document.hidden) return
       refresh().then(() => processNow({ includeErrors: false }))
     }, 5000)
     return () => {
       window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(timer)
     }
   }, [refresh, processNow])

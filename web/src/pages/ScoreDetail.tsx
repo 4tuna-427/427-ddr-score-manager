@@ -122,16 +122,17 @@ export function ScoreDetailPage() {
     <div className="field-row" key={key}>
       <span className="field-label">{label}</span>
       {editing === key ? (
-        <span className="field-edit">
+        <form className="field-edit" onSubmit={(e) => { e.preventDefault(); saveEdit(key, numeric) }}>
           <input
             value={editValue}
             inputMode={numeric ? 'numeric' : 'text'}
             onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setEditing(null) }}
             autoFocus
           />
-          <button type="button" disabled={busy} onClick={() => saveEdit(key, numeric)}>保存</button>
+          <button type="submit" disabled={busy}>保存</button>
           <button type="button" onClick={() => setEditing(null)}>取消</button>
-        </span>
+        </form>
       ) : (
         <button type="button" className="field-value" onClick={() => startEdit(key, value)}>
           {value == null || value === '' ? '—' : typeof value === 'number' ? value.toLocaleString() : String(value)}
@@ -214,10 +215,10 @@ export function ScoreDetailPage() {
               </div>
             </>
           )}
-          <div className="row">
+          <form className="row" onSubmit={(e) => { e.preventDefault(); onSearch() }}>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="曲名で検索" />
-            <button type="button" onClick={onSearch}>検索</button>
-          </div>
+            <button type="submit">検索</button>
+          </form>
           <ul className="link-list">
             {songs.map((song) => (
               <li key={song.song_id}>

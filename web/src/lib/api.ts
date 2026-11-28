@@ -7,12 +7,14 @@ export function getApiToken(): string {
 }
 export function setApiToken(v: string): void {
   localStorage.setItem(TOKEN_KEY, v)
+  clearJacketCache()
 }
 export function getApiBaseUrl(): string {
   return localStorage.getItem(BASE_KEY) || ''
 }
 export function setApiBaseUrl(v: string): void {
   localStorage.setItem(BASE_KEY, v.replace(/\/$/, ''))
+  clearJacketCache()
 }
 
 export interface ReviewReason {
@@ -148,6 +150,13 @@ export function analyzeImage(file: Blob, source: string, playedAtIso?: string, b
 
 const jacketUrlCache = new Map<string, Promise<string | null>>()
 
+export function clearJacketCache(): void {
+  for (const p of jacketUrlCache.values()) {
+    void p.then((url) => { if (url) URL.revokeObjectURL(url) })
+  }
+  jacketUrlCache.clear()
+}
+
 /** Authenticated jacket image as an object URL (null when unavailable). Cached per song. */
 export function fetchJacketObjectUrl(songId: string): Promise<string | null> {
   let p = jacketUrlCache.get(songId)
@@ -159,9 +168,13 @@ export function fetchJacketObjectUrl(songId: string): Promise<string | null> {
         const token = getApiToken()
         if (token) headers.set('X-API-Token', token)
         const res = await fetch(`${base}/api/jackets/${encodeURIComponent(songId)}`, { headers })
-        if (!res.ok) return null
+        if (!res.ok) {
+          jacketUrlCache.delete(songId)
+          return null
+        }
         return URL.createObjectURL(await res.blob())
       } catch {
+        jacketUrlCache.delete(songId)
         return null
       }
     })()

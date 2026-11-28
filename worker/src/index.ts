@@ -271,22 +271,8 @@ async function attachReviewDetails<T extends Record<string, any>>(
   await attachCandidates(db, rows);
 
   // For rows where song matched but chart didn't (difficulty mismatch), attach available charts of that song.
-  const songOnlyIds = [...new Set(
-    rows.filter((r) => r.song_id && !r.chart_id).map((r) => String(r.song_id)),
-  )];
-  const chartsBySong = new Map<string, { chart_id: string; play_style: string; difficulty: string; level: number | null }[]>();
-  for (const chunk of chunkArray(songOnlyIds)) {
-    const placeholders = chunk.map(() => "?").join(", ");
-    const { results: songCharts } = await db
-      .prepare(`SELECT chart_id, song_id, play_style, difficulty, level FROM charts WHERE song_id IN (${placeholders}) ORDER BY play_style, difficulty`)
-      .bind(...chunk)
-      .all<{ chart_id: string; song_id: string; play_style: string; difficulty: string; level: number | null }>();
-    for (const ch of songCharts) {
-      const list = chartsBySong.get(ch.song_id) ?? [];
-      list.push({ chart_id: ch.chart_id, play_style: ch.play_style, difficulty: ch.difficulty, level: ch.level });
-      chartsBySong.set(ch.song_id, list);
-    }
-  }
+  const songOnlyIds = rows.filter((r) => r.song_id && !r.chart_id).map((r) => String(r.song_id));
+  const chartsBySong = await fetchChartsBySongIds(db, songOnlyIds);
 
   for (const r of rows) {
     if (r.song_id && !r.chart_id) {
@@ -389,6 +375,67 @@ async function getScore(db: D1Database, id: string): Promise<Record<string, unkn
 async function getChart(db: D1Database, id: string): Promise<ChartDbRow | null> {
   const row = await db.prepare("SELECT * FROM charts WHERE chart_id = ?").bind(id).first<ChartDbRow>();
   return row ?? null;
+}
+
+async function fetchChartsBySongIds(
+  db: D1Database,
+  songIds: string[],
+): Promise<Map<string, { chart_id: string; play_style: string; difficulty: string; level: number | null }[]>> {
+  const bySong = new Map<string, { chart_id: string; play_style: string; difficulty: string; level: number | null }[]>();
+  const uniqueIds = [...new Set(songIds)];
+  for (const chunk of chunkArray(uniqueIds)) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const { results } = await db
+      .prepare(`SELECT chart_id, song_id, play_style, difficulty, level FROM charts WHERE song_id IN (${placeholders}) ORDER BY play_style, difficulty`)
+      .bind(...chunk)
+      .all<{ chart_id: string; song_id: string; play_style: string; difficulty: string; level: number | null }>();
+    for (const ch of results) {
+      const list = bySong.get(ch.song_id) ?? [];
+      list.push({ chart_id: ch.chart_id, play_style: ch.play_style, difficulty: ch.difficulty, level: ch.level });
+      bySong.set(ch.song_id, list);
+    }
+  }
+  return bySong;
+}
+
+async function applyChartLinkToScore(
+  env: Env,
+  row: Record<string, any>,
+  chart: ChartDbRow,
+  levelOverride?: number | null,
+): Promise<void> {
+  const level = levelOverride !== undefined ? levelOverride : chart.level;
+  const merged: Record<string, any> = {
+    ...row,
+    chart_id: chart.chart_id,
+    song_id: chart.song_id,
+    play_style: chart.play_style,
+    difficulty: chart.difficulty,
+    level,
+  };
+  const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, env.MY_DANCER_NAME) : false;
+  const checks = recomputeChecks(merged, chart, { playerUnresolved });
+  await env.DB
+    .prepare(
+      `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
+       ex_check = ?, judge_sum_check = ?, needs_review = ?,
+       review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
+    )
+    .bind(
+      chart.chart_id,
+      chart.song_id,
+      chart.play_style,
+      chart.difficulty,
+      level,
+      checks.ex_check,
+      checks.judge_sum_check,
+      checks.needs_review,
+      row.id,
+    )
+    .run();
+  if (checks.needs_review === 0) {
+    await deleteReviewImage(env, String(row.id));
+  }
 }
 
 /**
@@ -1009,28 +1056,7 @@ app.post("/api/scores/:id/link", async (c) => {
   const chart = await getChart(c.env.DB, body.chart_id);
   if (!chart) return c.json({ error: "chart not found" }, 404);
 
-  const merged: Record<string, any> = {
-    ...row,
-    chart_id: chart.chart_id,
-    song_id: chart.song_id,
-    play_style: chart.play_style,
-    difficulty: chart.difficulty,
-    level: chart.level,
-  };
-  const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, c.env.MY_DANCER_NAME) : false;
-  const checks = recomputeChecks(merged, chart, { playerUnresolved });
-  await c.env.DB
-    .prepare(
-      `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
-       ex_check = ?, judge_sum_check = ?, needs_review = ?,
-       review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
-    )
-    .bind(chart.chart_id, chart.song_id, chart.play_style, chart.difficulty, chart.level,
-      checks.ex_check, checks.judge_sum_check, checks.needs_review, id)
-    .run();
-  if (checks.needs_review === 0) {
-    await deleteReviewImage(c.env, id);
-  }
+  await applyChartLinkToScore(c.env, row, chart);
   const updated = await getScore(c.env.DB, id);
   if (updated) await attachReviewDetails(c.env.DB, [updated as Record<string, any>], c.env.MY_DANCER_NAME);
   return c.json({ score: updated });
@@ -1162,7 +1188,12 @@ app.post("/api/targets", async (c) => {
       Date.now(),
     )
     .run();
-  return c.json({ target: await getTargetWithChart(c.env.DB, body.chart_id) });
+  const target = await getTargetWithChart(c.env.DB, body.chart_id);
+  if (target) {
+    const lamps = await fetchBestLamps(c.env.DB, [body.chart_id]);
+    target.best_lamp = lamps.get(body.chart_id) ?? null;
+  }
+  return c.json({ target });
 });
 
 app.delete("/api/targets/:chart_id", async (c) => {
@@ -1189,20 +1220,17 @@ app.get("/api/songs/by-phash", async (c) => {
     .prepare("SELECT song_id, title, artist, phash_8 FROM songs WHERE phash_8 IS NOT NULL")
     .all<{ song_id: string; title: string; artist: string | null; phash_8: string }>();
   const candidates = findPhashCandidates(phash, songs, limit, maxDistance);
-  const items = [];
-  for (const cand of candidates) {
-    const { results: charts } = await c.env.DB
-      .prepare("SELECT chart_id, play_style, difficulty, level FROM charts WHERE song_id = ? ORDER BY play_style, difficulty")
-      .bind(cand.song.song_id)
-      .all();
-    items.push({
-      song_id: cand.song.song_id,
-      title: cand.song.title,
-      artist: cand.song.artist,
-      distance: cand.distance,
-      charts,
-    });
-  }
+  const chartsBySong = await fetchChartsBySongIds(
+    c.env.DB,
+    candidates.map((cand) => cand.song.song_id),
+  );
+  const items = candidates.map((cand) => ({
+    song_id: cand.song.song_id,
+    title: cand.song.title,
+    artist: cand.song.artist,
+    distance: cand.distance,
+    charts: chartsBySong.get(cand.song.song_id) ?? [],
+  }));
   return c.json({ items });
 });
 
@@ -1213,14 +1241,16 @@ app.get("/api/songs", async (c) => {
     .prepare("SELECT * FROM songs WHERE title_normalized LIKE ? ESCAPE '\\' ORDER BY title LIMIT 20")
     .bind(`%${q.replace(/[%_\\]/g, "\\$&")}%`)
     .all<SongRow>();
-  const items = [];
-  for (const song of songs) {
-    const { results: charts } = await c.env.DB
-      .prepare("SELECT chart_id, play_style, difficulty, level FROM charts WHERE song_id = ? ORDER BY play_style, difficulty")
-      .bind(song.song_id)
-      .all();
-    items.push({ song_id: song.song_id, title: song.title, artist: song.artist, charts });
-  }
+  const chartsBySong = await fetchChartsBySongIds(
+    c.env.DB,
+    songs.map((s) => s.song_id),
+  );
+  const items = songs.map((song) => ({
+    song_id: song.song_id,
+    title: song.title,
+    artist: song.artist,
+    charts: chartsBySong.get(song.song_id) ?? [],
+  }));
   return c.json({ items });
 });
 
@@ -1295,37 +1325,7 @@ app.post("/api/songs/custom", async (c) => {
         shock,
         max_ex: maxEx,
       };
-      const merged: Record<string, any> = {
-        ...row,
-        chart_id: chartId,
-        song_id: songId,
-        play_style: body.play_style,
-        difficulty: body.difficulty,
-        level: level ?? row.level,
-      };
-      const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, c.env.MY_DANCER_NAME) : false;
-      const checks = recomputeChecks(merged, chart, { playerUnresolved });
-      await c.env.DB
-        .prepare(
-          `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
-           ex_check = ?, judge_sum_check = ?, needs_review = ?,
-           review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
-        )
-        .bind(
-          chartId,
-          songId,
-          body.play_style,
-          body.difficulty,
-          merged.level,
-          checks.ex_check,
-          checks.judge_sum_check,
-          checks.needs_review,
-          scoreId,
-        )
-        .run();
-      if (checks.needs_review === 0) {
-        await deleteReviewImage(c.env, scoreId);
-      }
+      await applyChartLinkToScore(c.env, row, chart, level ?? (row.level as number | null));
       updatedScore = await getScore(c.env.DB, scoreId);
       if (updatedScore) await attachReviewDetails(c.env.DB, [updatedScore as Record<string, any>], c.env.MY_DANCER_NAME);
     }
@@ -1607,31 +1607,46 @@ async function relinkUnlinkedScores(
       env.DB, row.raw_title, row.play_style, row.difficulty,
     );
     if (!song || !chart) continue;
-    const merged: Record<string, any> = {
-      ...row,
-      chart_id: chart.chart_id,
-      song_id: chart.song_id,
-      play_style: chart.play_style,
-      difficulty: chart.difficulty,
-      level: chart.level,
-    };
-    const playerUnresolved = row.needs_review === 1 ? isPlayerUnresolved(merged, env.MY_DANCER_NAME) : false;
-    const checks = recomputeChecks(merged, chart, { playerUnresolved });
-    await env.DB
-      .prepare(
-        `UPDATE scores SET chart_id = ?, song_id = ?, play_style = ?, difficulty = ?, level = ?,
-         ex_check = ?, judge_sum_check = ?, needs_review = ?,
-         review_status = NULL${checks.needs_review === 0 ? ", has_review_image = 0" : ""} WHERE id = ?`,
-      )
-      .bind(chart.chart_id, chart.song_id, chart.play_style, chart.difficulty, chart.level,
-        checks.ex_check, checks.judge_sum_check, checks.needs_review, row.id)
-      .run();
-    if (checks.needs_review === 0) {
-      await deleteReviewImage(env, row.id);
-    }
+    await applyChartLinkToScore(env, row, chart);
     linked += 1;
   }
   return { checked: rows.length, linked, remaining: rows.length - linked };
+}
+
+async function recheckScoreRow(
+  env: Env,
+  row: Record<string, any>,
+  chart: ChartDbRow,
+  opts: { learnDeficit: boolean },
+): Promise<boolean> {
+  const playerUnresolved = isPlayerUnresolved(row, env.MY_DANCER_NAME);
+  let effectiveChart = chart;
+  if (opts.learnDeficit) {
+    const learned = await learnJudgeSumDeficit(env.DB, row as any, chart, {
+      songLinked: !!row.song_id,
+      playerUnresolved,
+    });
+    if (learned) effectiveChart = learned;
+  }
+  const checks = recomputeChecks(row, effectiveChart, { playerUnresolved });
+  if (checks.needs_review === 0) {
+    await env.DB
+      .prepare(
+        `UPDATE scores SET ex_check = ?, judge_sum_check = ?, needs_review = 0,
+         review_status = NULL, has_review_image = 0 WHERE id = ?`,
+      )
+      .bind(checks.ex_check, checks.judge_sum_check, row.id)
+      .run();
+    await deleteReviewImage(env, String(row.id));
+    return true;
+  }
+  if (checks.ex_check !== row.ex_check || checks.judge_sum_check !== row.judge_sum_check) {
+    await env.DB
+      .prepare("UPDATE scores SET ex_check = ?, judge_sum_check = ? WHERE id = ?")
+      .bind(checks.ex_check, checks.judge_sum_check, row.id)
+      .run();
+  }
+  return false;
 }
 
 async function recheckLinkedNeedsReviewScores(
@@ -1642,33 +1657,13 @@ async function recheckLinkedNeedsReviewScores(
     .all<Record<string, any>>();
   let resolved = 0;
   for (const row of rows) {
-    let chart = await getChart(env.DB, String(row.chart_id));
+    const chart = await getChart(env.DB, String(row.chart_id));
     if (!chart) continue;
-    const playerUnresolved = isPlayerUnresolved(row, env.MY_DANCER_NAME);
     // Flagged plays already in review can teach the deficit too (e.g.
     // the Blew My Mind / 1116 plays): learn first, then recheck against
     // the learned chart so they clear in the same pass.
-    const learned = await learnJudgeSumDeficit(env.DB, row as any, chart, {
-      songLinked: !!row.song_id,
-      playerUnresolved,
-    });
-    if (learned) chart = learned;
-    const checks = recomputeChecks(row, chart, { playerUnresolved });
-    if (checks.needs_review === 0) {
-      await env.DB
-        .prepare(
-          `UPDATE scores SET ex_check = ?, judge_sum_check = ?, needs_review = 0,
-           review_status = NULL, has_review_image = 0 WHERE id = ?`,
-        )
-        .bind(checks.ex_check, checks.judge_sum_check, row.id)
-        .run();
-      await deleteReviewImage(env, String(row.id));
+    if (await recheckScoreRow(env, row, chart, { learnDeficit: true })) {
       resolved += 1;
-    } else if (checks.ex_check !== row.ex_check || checks.judge_sum_check !== row.judge_sum_check) {
-      await env.DB
-        .prepare("UPDATE scores SET ex_check = ?, judge_sum_check = ? WHERE id = ?")
-        .bind(checks.ex_check, checks.judge_sum_check, row.id)
-        .run();
     }
   }
   return { rechecked: rows.length, resolved };
@@ -1690,23 +1685,8 @@ async function recheckChartScores(env: Env, chartId: string): Promise<number> {
     .all<Record<string, any>>();
   let resolved = 0;
   for (const row of rows) {
-    const playerUnresolved = isPlayerUnresolved(row, env.MY_DANCER_NAME);
-    const checks = recomputeChecks(row, chart, { playerUnresolved });
-    if (checks.needs_review === 0) {
-      await env.DB
-        .prepare(
-          `UPDATE scores SET ex_check = ?, judge_sum_check = ?, needs_review = 0,
-           review_status = NULL, has_review_image = 0 WHERE id = ?`,
-        )
-        .bind(checks.ex_check, checks.judge_sum_check, row.id)
-        .run();
-      await deleteReviewImage(env, String(row.id));
+    if (await recheckScoreRow(env, row, chart, { learnDeficit: false })) {
       resolved += 1;
-    } else if (checks.ex_check !== row.ex_check || checks.judge_sum_check !== row.judge_sum_check) {
-      await env.DB
-        .prepare("UPDATE scores SET ex_check = ?, judge_sum_check = ? WHERE id = ?")
-        .bind(checks.ex_check, checks.judge_sum_check, row.id)
-        .run();
     }
   }
   return resolved;
