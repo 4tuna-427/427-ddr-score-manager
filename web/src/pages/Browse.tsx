@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { browseCharts, getBrowseFacets, type BrowseItem } from '../lib/api'
+import { fetchUpToCount, getDataVersion, getPageCache, setPageCache, useScrollRestore } from '../lib/dataCache'
 import { exRatePercent } from '../lib/stats'
 import { fmtDate } from '../components/ScoreList'
 import { DiffBadge } from '../components/DiffBadge'
@@ -8,6 +9,13 @@ import JacketThumb from '../components/JacketThumb'
 
 const DIFFS = ['BEGINNER', 'BASIC', 'DIFFICULT', 'EXPERT', 'CHALLENGE']
 const PAGE = 50
+
+interface BrowseListCache {
+  filterKey: string
+  q: string
+  items: BrowseItem[]
+  total: number
+}
 
 /** One-tap level shortcuts: the user's main range (16-18) first. */
 const QUICK_LEVELS = [16, 17, 18, 15, 19]
@@ -41,7 +49,23 @@ export function BrowsePage() {
     const v = searchParams.get('level')
     return v != null && /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 19 ? v : null
   })()
-  const [q, setQ] = useState('')
+  const [initialMatch] = useState(() => {
+    const c = getPageCache<BrowseListCache>('browse:list')
+    const initQ = urlLevel ? '' : (c?.data.q ?? '')
+    const initKey = JSON.stringify({
+      q: initQ,
+      style: saved.style,
+      difficulty: saved.difficulty,
+      level: urlLevel ?? saved.level,
+      version: saved.version,
+      category: saved.category,
+      played: saved.played,
+      sort: saved.sort,
+      dir: saved.dir === 'desc' ? 'desc' : 'asc',
+    })
+    return c && c.data.filterKey === initKey ? c : undefined
+  })
+  const [q, setQ] = useState(() => (urlLevel ? '' : initialMatch?.data.q ?? ''))
   const [style, setStyle] = useState(saved.style)
   const [difficulty, setDifficulty] = useState(saved.difficulty)
   const [level, setLevel] = useState(urlLevel ?? saved.level)
@@ -62,16 +86,30 @@ export function BrowsePage() {
     setSort(v)
     setDir(SORT_DEFAULT_DIR[v] ?? 'asc')
   }
-  const [versions, setVersions] = useState<string[]>([])
-  const [items, setItems] = useState<BrowseItem[]>([])
-  const [total, setTotal] = useState(0)
+  const [versions, setVersions] = useState<string[]>(() => getPageCache<string[]>('browse:facets')?.data ?? [])
+  const [items, setItems] = useState<BrowseItem[]>(() => initialMatch?.data.items ?? [])
+  const [total, setTotal] = useState(() => initialMatch?.data.total ?? 0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const reqRef = useRef(0)
+  const lastFetchedKeyRef = useRef<string | null>(initialMatch?.data.filterKey ?? null)
+
+  useScrollRestore('browse', items.length > 0)
 
   useEffect(() => {
-    getBrowseFacets().then((f) => setVersions(f.versions)).catch(() => setVersions([]))
+    const c = getPageCache<string[]>('browse:facets')
+    if (c && c.version === getDataVersion()) return
+    getBrowseFacets()
+      .then((f) => {
+        setVersions(f.versions)
+        setPageCache('browse:facets', f.versions)
+      })
+      .catch(() => {
+        if (!c) setVersions([])
+      })
   }, [])
+
+  const filterKey = JSON.stringify({ q, style, difficulty, level, version, category, played, sort, dir })
 
   const fetchPage = useCallback(
     async (offset: number, append: boolean) => {
@@ -86,8 +124,13 @@ export function BrowsePage() {
           limit: PAGE, offset,
         })
         if (req !== reqRef.current) return
+        lastFetchedKeyRef.current = filterKey
         setTotal(res.total)
-        setItems((prev) => (append ? [...prev, ...res.items] : res.items))
+        setItems((prev) => {
+          const next = append ? [...prev, ...res.items] : res.items
+          setPageCache<BrowseListCache>('browse:list', { filterKey, q, items: next, total: res.total })
+          return next
+        })
       } catch (e) {
         if (req !== reqRef.current) return
         setError(e instanceof Error ? e.message : String(e))
@@ -95,14 +138,42 @@ export function BrowsePage() {
         if (req === reqRef.current) setLoading(false)
       }
     },
-    [q, style, difficulty, level, version, category, played, sort, dir],
+    [q, style, difficulty, level, version, category, played, sort, dir, filterKey],
   )
 
   // Refetch from the top whenever a filter changes (text input debounced).
   useEffect(() => {
+    if (filterKey === lastFetchedKeyRef.current) {
+      const c = getPageCache<BrowseListCache>('browse:list')
+      if (!c || c.version === getDataVersion()) return
+      const req = ++reqRef.current
+      const targetCount = Math.max(PAGE, c.data.items.length)
+      fetchUpToCount(
+        (offset, limit) =>
+          browseCharts({
+            q, style, difficulty,
+            level: level ? Number(level) : undefined,
+            version, category, played, sort, dir,
+            limit, offset,
+          }),
+        targetCount,
+        PAGE,
+      )
+        .then((res) => {
+          if (req !== reqRef.current) return
+          setTotal(res.total)
+          setItems(res.items)
+          setPageCache<BrowseListCache>('browse:list', { filterKey, q, items: res.items, total: res.total })
+        })
+        .catch((e) => {
+          if (req !== reqRef.current) return
+          setError(e instanceof Error ? e.message : String(e))
+        })
+      return
+    }
     const t = window.setTimeout(() => fetchPage(0, false), 250)
     return () => window.clearTimeout(t)
-  }, [fetchPage])
+  }, [fetchPage, filterKey, q, style, difficulty, level, version, category, played, sort, dir])
 
   return (
     <div>

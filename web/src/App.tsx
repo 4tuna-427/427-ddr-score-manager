@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { QueueProvider } from './lib/queue'
 import { getApiToken, listScores } from './lib/api'
+import { useDataVersion } from './lib/dataCache'
 import { HomePage } from './pages/Home'
 import { HistoryPage } from './pages/History'
 import { ReviewPage } from './pages/Review'
@@ -13,7 +14,7 @@ const ChartPage = lazy(() => import('./pages/Chart').then((m) => ({ default: m.C
 const StatsPage = lazy(() => import('./pages/Stats').then((m) => ({ default: m.StatsPage })))
 
 function BottomNav() {
-  const { pathname } = useLocation()
+  const dataVersion = useDataVersion()
   const [reviewCount, setReviewCount] = useState(0)
 
   useEffect(() => {
@@ -26,7 +27,7 @@ function BottomNav() {
       .then((r) => { if (alive) setReviewCount(r.total) })
       .catch(() => undefined)
     return () => { alive = false }
-  }, [pathname])
+  }, [dataVersion])
 
   useEffect(() => {
     const onChanged = (e: Event) => {

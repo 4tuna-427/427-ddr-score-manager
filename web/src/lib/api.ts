@@ -1,4 +1,6 @@
 // API client per docs/API.md. Base URL and token come from localStorage (Settings page).
+import { bumpDataVersion, clearDataCache } from './dataCache'
+
 const TOKEN_KEY = 'ddr.apiToken'
 const BASE_KEY = 'ddr.apiBaseUrl'
 
@@ -8,6 +10,7 @@ export function getApiToken(): string {
 export function setApiToken(v: string): void {
   localStorage.setItem(TOKEN_KEY, v)
   clearJacketCache()
+  clearDataCache()
 }
 export function getApiBaseUrl(): string {
   return localStorage.getItem(BASE_KEY) || ''
@@ -15,6 +18,7 @@ export function getApiBaseUrl(): string {
 export function setApiBaseUrl(v: string): void {
   localStorage.setItem(BASE_KEY, v.replace(/\/$/, ''))
   clearJacketCache()
+  clearDataCache()
 }
 
 export interface ReviewReason {
@@ -134,6 +138,10 @@ async function rawRequest(path: string, init: RequestInit = {}): Promise<Respons
       if (body && body.error) msg = body.error
     } catch { /* keep default */ }
     throw new ApiError(res.status, msg)
+  }
+  const method = (init.method ?? 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD') {
+    bumpDataVersion()
   }
   return res
 }

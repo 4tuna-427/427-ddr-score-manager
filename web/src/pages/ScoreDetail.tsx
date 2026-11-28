@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   deleteScore, getScore, linkChart, patchScore, selectPlayer,
   type Score,
 } from '../lib/api'
+import { getDataVersion, getPageCache, setPageCache } from '../lib/dataCache'
 import { fmtDate } from '../components/ScoreList'
 import { diffLabel } from '../components/DiffBadge'
 import { JudgeBar } from '../components/JudgeBar'
@@ -36,21 +37,31 @@ const TEXT_FIELDS: { key: keyof Score; label: string }[] = [
 export function ScoreDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [score, setScore] = useState<Score | null>(null)
+  const cacheKey = id ? `score:${id}` : ''
+  const [score, setScore] = useState<Score | null>(() => (cacheKey ? getPageCache<Score>(cacheKey)?.data ?? null : null))
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [showRelink, setShowRelink] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const load = useCallback(() => {
+  useEffect(() => {
     if (!id) return
+    const c = getPageCache<Score>(cacheKey)
+    if (c) setScore(c.data)
+    if (c && c.version === getDataVersion()) return
+    let alive = true
     getScore(id)
-      .then((r) => setScore(r.score))
-      .catch((e) => setError(e.message))
-  }, [id])
-
-  useEffect(load, [load])
+      .then((r) => {
+        if (!alive) return
+        setScore(r.score)
+        setPageCache(cacheKey, r.score)
+      })
+      .catch((e) => {
+        if (alive && !c) setError(e.message)
+      })
+    return () => { alive = false }
+  }, [id, cacheKey])
 
   if (error) return <p className="warn">{error}</p>
   if (!score) return <p className="muted">読み込み中…</p>
@@ -74,6 +85,7 @@ export function ScoreDetailPage() {
       const value = editValue.trim() === '' ? null : numeric ? Number(editValue) : editValue.trim()
       const r = await patchScore(id, { [key]: value })
       setScore(r.score)
+      setPageCache(cacheKey, r.score)
       setEditing(null)
     } catch (e: unknown) {
       setError(errMsg(e))
@@ -88,6 +100,7 @@ export function ScoreDetailPage() {
     try {
       const r = await selectPlayer(id, player)
       setScore(r.score)
+      setPageCache(cacheKey, r.score)
     } catch (e: unknown) {
       setError(errMsg(e))
     } finally {
@@ -101,6 +114,7 @@ export function ScoreDetailPage() {
     try {
       const r = await linkChart(id, chartId)
       setScore(r.score)
+      setPageCache(cacheKey, r.score)
       setShowRelink(false)
     } catch (e: unknown) {
       setError(errMsg(e))

@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listScores, relinkScores, type Score } from '../lib/api'
+import { fetchUpToCount, getDataVersion, getPageCache, setPageCache, useScrollRestore } from '../lib/dataCache'
 import { ReviewCard } from '../components/ReviewCard'
 
 type FilterTab = 'all' | 'song' | 'score' | 'waiting'
+
+interface ReviewCache {
+  items: Score[]
+  total: number
+  tab: FilterTab
+}
 
 function hasReason(score: Score, codes: string[]): boolean {
   return (score.review_reasons ?? []).some((r) => codes.includes(r.code))
@@ -31,19 +38,26 @@ function matchesTab(score: Score, tab: FilterTab): boolean {
 }
 
 export function ReviewPage() {
-  const [items, setItems] = useState<Score[]>([])
-  const [total, setTotal] = useState(0)
-  const [tab, setTab] = useState<FilterTab>('all')
+  const [cached] = useState(() => getPageCache<ReviewCache>('review'))
+  const [items, setItems] = useState<Score[]>(() => cached?.data.items ?? [])
+  const [total, setTotal] = useState(() => cached?.data.total ?? 0)
+  const [tab, setTab] = useState<FilterTab>(() => cached?.data.tab ?? 'all')
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!cached)
   const [relinkMsg, setRelinkMsg] = useState('')
   const [relinking, setRelinking] = useState(false)
+
+  useScrollRestore('review', items.length > 0)
 
   const load = useCallback(async (offset = 0, append = false) => {
     setLoading(true)
     try {
       const r = await listScores({ limit: 100, offset, needsReview: true })
-      setItems((prev) => (append ? [...prev, ...r.items] : r.items))
+      setItems((prev) => {
+        const next = append ? [...prev, ...r.items] : r.items
+        setPageCache<ReviewCache>('review', { items: next, total: r.total, tab })
+        return next
+      })
       setTotal(r.total)
       window.dispatchEvent(new CustomEvent('ddr:review-changed', { detail: r.total }))
     } catch (e) {
@@ -51,9 +65,35 @@ export function ReviewPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [tab])
 
-  useEffect(() => { load(0, false) }, [load])
+  useEffect(() => {
+    if (!cached) {
+      load(0, false)
+      return
+    }
+    if (cached.version === getDataVersion()) return
+    let alive = true
+    const targetCount = Math.max(100, cached.data.items.length)
+    fetchUpToCount((offset, limit) => listScores({ limit, offset, needsReview: true }), targetCount, 100)
+      .then((r) => {
+        if (!alive) return
+        setItems(r.items)
+        setTotal(r.total)
+        setPageCache<ReviewCache>('review', { items: r.items, total: r.total, tab })
+        window.dispatchEvent(new CustomEvent('ddr:review-changed', { detail: r.total }))
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e))
+      })
+    return () => { alive = false }
+  }, [cached, load, tab])
+
+  const changeTab = (nextTab: FilterTab) => {
+    setTab(nextTab)
+    const c = getPageCache<ReviewCache>('review')
+    if (c) setPageCache<ReviewCache>('review', { ...c.data, tab: nextTab }, c.version)
+  }
 
   const counts = useMemo(
     () => ({
@@ -110,7 +150,7 @@ export function ReviewPage() {
             role="tab"
             aria-selected={tab === key}
             className={`review-tab ${tab === key ? 'active' : ''}`}
-            onClick={() => setTab(key)}
+            onClick={() => changeTab(key)}
           >
             {label} <span className="review-tab-count">{count}</span>
           </button>

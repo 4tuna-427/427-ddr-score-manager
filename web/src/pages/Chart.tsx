@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { deleteTarget, getChartHistory, getTarget, saveTarget, type ChartHistory, type Target } from '../lib/api'
+import { getDataVersion, getPageCache, setPageCache } from '../lib/dataCache'
 import { useIsDark } from '../lib/theme'
 import { FLARE_ORDER, LAMP_ORDER } from '../lib/stats'
 import { ScoreList, fmtDate } from '../components/ScoreList'
@@ -10,29 +11,58 @@ import JacketThumb from '../components/JacketThumb'
 
 const TARGET_LAMPS = ['', 'CLEAR', 'LIFE4', 'FC', 'GFC', 'PFC', 'MFC']
 
+interface ChartCache {
+  data: ChartHistory
+  target: Target | null
+}
+
 export function ChartPage() {
   const dark = useIsDark()
   const { chartId } = useParams<{ chartId: string }>()
-  const [data, setData] = useState<ChartHistory | null>(null)
+  const decodedId = chartId ? decodeURIComponent(chartId) : ''
+  const cacheKey = decodedId ? `chart:${decodedId}` : ''
+  const [initialCache] = useState(() => (cacheKey ? getPageCache<ChartCache>(cacheKey) : undefined))
+  const [data, setData] = useState<ChartHistory | null>(() => initialCache?.data.data ?? null)
   const [error, setError] = useState('')
-  const [target, setTarget] = useState<Target | null>(null)
-  const [targetScore, setTargetScore] = useState('')
-  const [targetLamp, setTargetLamp] = useState('')
+  const [target, setTarget] = useState<Target | null>(() => initialCache?.data.target ?? null)
+  const [targetScore, setTargetScore] = useState(() =>
+    initialCache?.data.target?.target_score != null ? String(initialCache.data.target.target_score) : '',
+  )
+  const [targetLamp, setTargetLamp] = useState(() => initialCache?.data.target?.target_lamp ?? '')
   const [targetMsg, setTargetMsg] = useState('')
 
   useEffect(() => {
-    if (!chartId) return
-    getChartHistory(decodeURIComponent(chartId))
-      .then(setData)
-      .catch((e) => setError(e.message))
-    getTarget(decodeURIComponent(chartId))
+    if (!decodedId) return
+    const c = getPageCache<ChartCache>(cacheKey)
+    if (c) {
+      setData(c.data.data)
+      setTarget(c.data.target)
+      setTargetScore(c.data.target?.target_score != null ? String(c.data.target.target_score) : '')
+      setTargetLamp(c.data.target?.target_lamp ?? '')
+    }
+    if (c && c.version === getDataVersion()) return
+    let alive = true
+    const histP = getChartHistory(decodedId).then((h) => { if (alive) setData(h); return h })
+    const targetP = getTarget(decodedId)
       .then((r) => {
-        setTarget(r.target)
-        setTargetScore(r.target?.target_score != null ? String(r.target.target_score) : '')
-        setTargetLamp(r.target?.target_lamp ?? '')
+        if (alive) {
+          setTarget(r.target)
+          setTargetScore(r.target?.target_score != null ? String(r.target.target_score) : '')
+          setTargetLamp(r.target?.target_lamp ?? '')
+        }
+        return r.target
+      })
+      .catch(() => (c?.data.target ?? null))
+    histP.catch((e) => {
+      if (alive && !c) setError(e.message)
+    })
+    Promise.all([histP, targetP])
+      .then(([h, t]) => {
+        if (alive) setPageCache<ChartCache>(cacheKey, { data: h, target: t })
       })
       .catch(() => undefined)
-  }, [chartId])
+    return () => { alive = false }
+  }, [decodedId, cacheKey])
 
   if (error) return <p className="warn">{error}</p>
   if (!data) return <p className="muted">読み込み中…</p>
@@ -68,8 +98,9 @@ export function ChartPage() {
       return
     }
     try {
-      const r = await saveTarget(decodeURIComponent(chartId), score, targetLamp === '' ? null : targetLamp)
+      const r = await saveTarget(decodedId, score, targetLamp === '' ? null : targetLamp)
       setTarget(r.target)
+      setPageCache<ChartCache>(cacheKey, { data, target: r.target })
       setTargetMsg('目標を保存しました')
     } catch (e) {
       setTargetMsg(`保存に失敗しました: ${e instanceof Error ? e.message : String(e)}`)
@@ -79,10 +110,11 @@ export function ChartPage() {
   const doDeleteTarget = async () => {
     if (!chartId) return
     try {
-      await deleteTarget(decodeURIComponent(chartId))
+      await deleteTarget(decodedId)
       setTarget(null)
       setTargetScore('')
       setTargetLamp('')
+      setPageCache<ChartCache>(cacheKey, { data, target: null })
       setTargetMsg('目標を削除しました')
     } catch (e) {
       setTargetMsg(`削除に失敗しました: ${e instanceof Error ? e.message : String(e)}`)

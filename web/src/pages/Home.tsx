@@ -4,18 +4,23 @@ import { useQueue } from '../lib/queue'
 import { ResultCard } from '../components/ResultCard'
 import { diffLabel } from '../components/DiffBadge'
 import { getApiToken, getLatestDaySummary, type LatestDaySummary } from '../lib/api'
+import { useDataVersion } from '../lib/dataCache'
 
 export function HomePage() {
   const { items, processing, lastResults, lastSkips, bulkMode, setBulkMode, enqueue, remove, processNow, clearResults } = useQueue()
+  const dataVersion = useDataVersion()
   const [params] = useSearchParams()
   const shared = params.get('shared') === '1'
   const fileRef = useRef<HTMLInputElement>(null)
   const [summary, setSummary] = useState<LatestDaySummary | null>(null)
 
   useEffect(() => {
-    if (!getApiToken()) return
+    if (!getApiToken()) {
+      setSummary(null)
+      return
+    }
     getLatestDaySummary().then(setSummary).catch(() => setSummary(null))
-  }, [lastResults])
+  }, [dataVersion])
 
   const onFiles = async (files: FileList | null) => {
     if (!files) return

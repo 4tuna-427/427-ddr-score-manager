@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getCloseCalls, getStats, getTargets, getVersus, type AchievementBucket, type CloseCall, type StatsResponse, type Target, type VersusResponse } from '../lib/api'
+import { getDataVersion, getPageCache, setPageCache, useScrollRestore } from '../lib/dataCache'
 import { useIsDark } from '../lib/theme'
 import { LAMP_ORDER } from '../lib/stats'
 import { DiffBadge } from '../components/DiffBadge'
@@ -72,23 +73,42 @@ function Progress({ played, total }: { played: number; total: number }) {
   )
 }
 
+interface StatsCache {
+  data: StatsResponse
+  closeCalls: CloseCall[]
+  targets: Target[]
+  versus: VersusResponse
+}
+
 export function StatsPage() {
   const dark = useIsDark()
-  const [data, setData] = useState<StatsResponse | null>(null)
+  const [cached] = useState(() => getPageCache<StatsCache>('stats'))
+  const [data, setData] = useState<StatsResponse | null>(() => cached?.data.data ?? null)
   const [error, setError] = useState('')
   const [style, setStyle] = useState<'SP' | 'DP'>('SP')
-  const [closeCalls, setCloseCalls] = useState<CloseCall[] | null>(null)
-  const [targets, setTargets] = useState<Target[] | null>(null)
-  const [versus, setVersus] = useState<VersusResponse | null>(null)
+  const [closeCalls, setCloseCalls] = useState<CloseCall[] | null>(() => cached?.data.closeCalls ?? null)
+  const [targets, setTargets] = useState<Target[] | null>(() => cached?.data.targets ?? null)
+  const [versus, setVersus] = useState<VersusResponse | null>(() => cached?.data.versus ?? null)
+
+  useScrollRestore('stats', Boolean(data))
 
   useEffect(() => {
-    getStats()
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : '読み込みに失敗しました'))
-    getCloseCalls().then((r) => setCloseCalls(r.items)).catch(() => setCloseCalls([]))
-    getTargets().then((r) => setTargets(r.items)).catch(() => setTargets([]))
-    getVersus().then(setVersus).catch(() => setVersus({ opponents: [], recent: [] }))
-  }, [])
+    if (cached && cached.version === getDataVersion()) return
+    let alive = true
+    const statsP = getStats().then((s) => { if (alive) setData(s); return s })
+    const ccP = getCloseCalls().then((r) => r.items).catch(() => [] as CloseCall[]).then((cc) => { if (alive) setCloseCalls(cc); return cc })
+    const tgP = getTargets().then((r) => r.items).catch(() => [] as Target[]).then((tg) => { if (alive) setTargets(tg); return tg })
+    const vsP = getVersus().catch(() => ({ opponents: [], recent: [] } as VersusResponse)).then((vs) => { if (alive) setVersus(vs); return vs })
+    statsP.catch((e) => {
+      if (alive && !cached) setError(e instanceof Error ? e.message : '読み込みに失敗しました')
+    })
+    Promise.all([statsP, ccP, tgP, vsP])
+      .then(([s, cc, tg, vs]) => {
+        if (alive) setPageCache<StatsCache>('stats', { data: s, closeCalls: cc, targets: tg, versus: vs })
+      })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [cached])
 
   if (error) return <p className="warn">{error}</p>
   if (!data) return <p className="muted">読み込み中…</p>
