@@ -1669,3 +1669,49 @@ export function findPhashCandidates<T extends { phash_8: string | null }>(
   }
   return out.sort((a, b) => a.distance - b.distance).slice(0, limit);
 }
+
+const VALID_PATCH_DIFFS = ["BEGINNER", "BASIC", "DIFFICULT", "EXPERT", "CHALLENGE"] as const;
+const NON_NEG_INT_PATCH_FIELDS = [
+  "ex_score", "marvelous", "perfect", "great", "good", "ok", "miss",
+  "max_combo", "fast_count", "slow_count",
+] as const;
+const OPT_STR_PATCH_FIELDS = ["rank", "clear_lamp", "flare_rank"] as const;
+
+/** Validate fields accepted by PATCH /api/scores/:id. Returns an error message or null. */
+export function validateScorePatch(body: Record<string, unknown>): string | null {
+  if ("review_status" in body && body.review_status !== null && body.review_status !== "waiting_master") {
+    return "review_status must be null or 'waiting_master'";
+  }
+  if ("score" in body) {
+    const v = body.score;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 1000000) {
+      return "score must be an integer 0..1000000";
+    }
+  }
+  for (const k of NON_NEG_INT_PATCH_FIELDS) {
+    if (k in body && body[k] != null) {
+      const v = body[k];
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        return `${k} must be a non-negative integer or null`;
+      }
+    }
+  }
+  if ("level" in body && body.level != null) {
+    const v = body.level;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 20) {
+      return "level must be an integer 1..20 or null";
+    }
+  }
+  if ("difficulty" in body) {
+    const v = body.difficulty;
+    if (typeof v !== "string" || !(VALID_PATCH_DIFFS as readonly string[]).includes(v)) {
+      return `difficulty must be one of ${VALID_PATCH_DIFFS.join(", ")}`;
+    }
+  }
+  for (const k of OPT_STR_PATCH_FIELDS) {
+    if (k in body && body[k] != null && typeof body[k] !== "string") {
+      return `${k} must be a string or null`;
+    }
+  }
+  return null;
+}

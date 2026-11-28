@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { QueueProvider } from './lib/queue'
 import { HomePage } from './pages/Home'
@@ -6,8 +7,9 @@ import { ReviewPage } from './pages/Review'
 import { SettingsPage } from './pages/Settings'
 import { BrowsePage } from './pages/Browse'
 import { ScoreDetailPage } from './pages/ScoreDetail'
-import { ChartPage } from './pages/Chart'
-import { StatsPage } from './pages/Stats'
+
+const ChartPage = lazy(() => import('./pages/Chart').then((m) => ({ default: m.ChartPage })))
+const StatsPage = lazy(() => import('./pages/Stats').then((m) => ({ default: m.StatsPage })))
 
 export default function App() {
   return (
@@ -18,17 +20,19 @@ export default function App() {
           <div className="bar" />
         </header>
         <main className="container">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/upload" element={<HomePage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/scores/:id" element={<ScoreDetailPage />} />
-            <Route path="/charts/:chartId" element={<ChartPage />} />
-            <Route path="/browse" element={<BrowsePage />} />
-            <Route path="/stats" element={<StatsPage />} />
-            <Route path="/review" element={<ReviewPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
+          <Suspense fallback={<p className="muted">読み込み中…</p>}>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/upload" element={<HomePage />} />
+              <Route path="/history" element={<HistoryPage />} />
+              <Route path="/scores/:id" element={<ScoreDetailPage />} />
+              <Route path="/charts/:chartId" element={<ChartPage />} />
+              <Route path="/browse" element={<BrowsePage />} />
+              <Route path="/stats" element={<StatsPage />} />
+              <Route path="/review" element={<ReviewPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </Suspense>
         </main>
         <nav className="bottom-nav">
           <NavLink to="/" end>ホーム</NavLink>

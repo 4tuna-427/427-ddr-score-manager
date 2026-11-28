@@ -6,7 +6,7 @@ web/dist/
 web/tsconfig.tsbuildinfo
 
 # wrangler local state (never commit; secrets are set with `wrangler secret put`)
-worker/.wrangler/
+**/.wrangler/
 .dev.vars
 .dev.vars.*
 

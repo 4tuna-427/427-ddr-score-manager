@@ -29,6 +29,7 @@ import {
   findPhashCandidates,
   isValidPhash64,
   songCategory,
+  validateScorePatch,
   CATEGORY_VERSION_SPELLINGS,
   type SongCategory,
   type ChartCorrection,
@@ -917,8 +918,9 @@ app.patch("/api/scores/:id", async (c) => {
   const row = await getScore(c.env.DB, id);
   if (!row) return c.json({ error: "not found" }, 404);
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-  if ("review_status" in body && body.review_status !== null && body.review_status !== "waiting_master") {
-    return c.json({ error: "review_status must be null or 'waiting_master'" }, 400);
+  const validationError = validateScorePatch(body);
+  if (validationError) {
+    return c.json({ error: validationError }, 400);
   }
   const merged: Record<string, any> = { ...row };
   const sets: string[] = [];

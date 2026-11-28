@@ -598,16 +598,19 @@ function ReviewCard({ score, onReload, onError }: ReviewCardProps) {
 
 export function ReviewPage() {
   const [items, setItems] = useState<Score[]>([])
+  const [total, setTotal] = useState(0)
   const [tab, setTab] = useState<FilterTab>('all')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [relinkMsg, setRelinkMsg] = useState('')
   const [relinking, setRelinking] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (offset = 0, append = false) => {
+    setLoading(true)
     try {
-      const r = await listScores({ limit: 100, needsReview: true })
-      setItems(r.items)
+      const r = await listScores({ limit: 100, offset, needsReview: true })
+      setItems((prev) => (append ? [...prev, ...r.items] : r.items))
+      setTotal(r.total)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -615,7 +618,7 @@ export function ReviewPage() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(0, false) }, [load])
 
   const counts = useMemo(
     () => ({
@@ -637,7 +640,7 @@ export function ReviewPage() {
       setRelinkMsg(
         `再マッチング：${r.checked}件中 ${r.linked}件リンク（残り${r.remaining}件）／再検算：${r.rechecked ?? 0}件中 ${r.resolved ?? 0}件解決`,
       )
-      await load()
+      await load(0, false)
     } catch (e) {
       setRelinkMsg(`再マッチング・再検算に失敗しました: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -648,7 +651,7 @@ export function ReviewPage() {
   return (
     <div>
       <div className="review-header">
-        <h1>要確認 {items.length > 0 && <span className="badge">{items.length}件</span>}</h1>
+        <h1>要確認 {total > 0 && <span className="badge">{total}件</span>}</h1>
         <button type="button" className="primary" onClick={doRelink} disabled={relinking}>
           {relinking ? '再マッチング・再検算中…' : '再マッチング・再検算'}
         </button>
@@ -679,7 +682,7 @@ export function ReviewPage() {
         ))}
       </div>
 
-      {loading && <p className="muted">読み込み中…</p>}
+      {loading && items.length === 0 && <p className="muted">読み込み中…</p>}
       {!loading && filtered.length === 0 && (
         <div className="card">
           <p className="muted" style={{ margin: 0 }}>
@@ -691,8 +694,13 @@ export function ReviewPage() {
       )}
 
       {filtered.map((item) => (
-        <ReviewCard key={item.id} score={item} onReload={load} onError={setError} />
+        <ReviewCard key={item.id} score={item} onReload={() => load(0, false)} onError={setError} />
       ))}
+      {items.length < total && (
+        <button type="button" onClick={() => load(items.length, true)} disabled={loading}>
+          {loading ? '読み込み中…' : `もっと見る（残り ${(total - items.length).toLocaleString()} 件）`}
+        </button>
+      )}
     </div>
   )
 }

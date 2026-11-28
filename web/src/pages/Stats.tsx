@@ -91,7 +91,7 @@ export function StatsPage() {
     getVersus().then(setVersus).catch(() => setVersus({ opponents: [], recent: [] }))
   }, [])
 
-  if (error) return <p className="error">{error}</p>
+  if (error) return <p className="warn">{error}</p>
   if (!data) return <p className="muted">読み込み中…</p>
 
   const t = data.totals
@@ -200,24 +200,26 @@ export function StatsPage() {
           <button type="button" className={style === 'SP' ? 'active' : ''} onClick={() => setStyle('SP')}>SP</button>
           <button type="button" className={style === 'DP' ? 'active' : ''} onClick={() => setStyle('DP')}>DP</button>
         </div>
-        <table className="level-table">
-          <thead>
-            <tr><th>Lv</th><th>プレイ済み</th><th>クリア</th><th>FC</th><th>PFC</th><th>MFC</th><th>EXスコア率</th></tr>
-          </thead>
-          <tbody>
-            {levels.map((r) => (
-              <tr key={`${r.play_style}-${r.level}`}>
-                <td className="lv-cell">{r.level}</td>
-                <td><Progress played={r.played} total={r.total_charts} /></td>
-                <td>{r.clear}</td>
-                <td>{r.fc}</td>
-                <td>{r.pfc}</td>
-                <td>{r.mfc}</td>
-                <td>{exByLevel.get(`${r.play_style}|${r.level}`)?.avg_ex_rate != null ? `${exByLevel.get(`${r.play_style}|${r.level}`)!.avg_ex_rate}%` : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table className="level-table">
+            <thead>
+              <tr><th>Lv</th><th>プレイ済み</th><th>クリア</th><th>FC</th><th>PFC</th><th>MFC</th><th>EXスコア率</th></tr>
+            </thead>
+            <tbody>
+              {levels.map((r) => (
+                <tr key={`${r.play_style}-${r.level}`}>
+                  <td className="lv-cell">{r.level}</td>
+                  <td><Progress played={r.played} total={r.total_charts} /></td>
+                  <td>{r.clear}</td>
+                  <td>{r.fc}</td>
+                  <td>{r.pfc}</td>
+                  <td>{r.mfc}</td>
+                  <td>{exByLevel.get(`${r.play_style}|${r.level}`)?.avg_ex_rate != null ? `${exByLevel.get(`${r.play_style}|${r.level}`)!.avg_ex_rate}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <p className="muted">EXスコア率は譜面ごとのベストEXスコア率の平均（ノーツ数がある譜面のみ）。</p>
       </section>
 
@@ -325,19 +327,21 @@ export function StatsPage() {
         {data.flare.charts_with_flare > 0 && (
           <>
             <h4>フレアランク別 達成譜面数（クリアした最高ランク）</h4>
-            <table className="level-table">
-              <thead>
-                <tr><th>フレアランク</th><th>譜面数</th></tr>
-              </thead>
-              <tbody>
-                {data.flare.by_rank.map((r) => (
-                  <tr key={r.flare_rank}>
-                    <td className="lv-cell">{r.flare_rank}</td>
-                    <td>{r.charts}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table className="level-table">
+                <thead>
+                  <tr><th>フレアランク</th><th>譜面数</th></tr>
+                </thead>
+                <tbody>
+                  {data.flare.by_rank.map((r) => (
+                    <tr key={r.flare_rank}>
+                      <td className="lv-cell">{r.flare_rank}</td>
+                      <td>{r.charts}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
         <p className="muted">
@@ -353,23 +357,25 @@ export function StatsPage() {
           <p className="muted">対戦記録がありません。</p>
         ) : (
           <>
-            <table className="level-table">
-              <thead>
-                <tr><th>相手</th><th>対戦数</th><th>勝</th><th>敗</th><th>分</th><th>直近</th></tr>
-              </thead>
-              <tbody>
-                {versus.opponents.map((o) => (
-                  <tr key={o.name}>
-                    <td>{o.name}</td>
-                    <td>{o.plays}</td>
-                    <td>{o.wins}</td>
-                    <td>{o.losses}</td>
-                    <td>{o.draws}</td>
-                    <td>{fmtDate(o.last_played_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="table-wrap">
+              <table className="level-table">
+                <thead>
+                  <tr><th>相手</th><th>対戦数</th><th>勝</th><th>敗</th><th>分</th><th>直近</th></tr>
+                </thead>
+                <tbody>
+                  {versus.opponents.map((o) => (
+                    <tr key={o.name}>
+                      <td>{o.name}</td>
+                      <td>{o.plays}</td>
+                      <td>{o.wins}</td>
+                      <td>{o.losses}</td>
+                      <td>{o.draws}</td>
+                      <td>{fmtDate(o.last_played_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <ul className="update-list cap-list">
               {versus.recent.map((r) => (
                 <li key={r.score_id}>

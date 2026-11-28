@@ -69,6 +69,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     }
   })
   const runningRef = useRef(false)
+  const recoveredRef = useRef(false)
 
   const setBulkMode = useCallback((v: boolean) => {
     setBulkModeState(v)
@@ -174,7 +175,24 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
   }, [refresh, bulkMode])
 
   useEffect(() => {
-    refresh().then(() => processNow())
+    const start = async () => {
+      if (!recoveredRef.current && !runningRef.current) {
+        recoveredRef.current = true
+        try {
+          const list = await listQueueItems()
+          for (const item of list) {
+            if (item.status === 'sending') {
+              await updateQueueItem({ ...item, status: 'pending', error: undefined })
+            }
+          }
+        } catch {
+          /* IndexedDB unavailable */
+        }
+      }
+      await refresh()
+      processNow()
+    }
+    start()
     const onOnline = () => processNow()
     window.addEventListener('online', onOnline)
     // Pick up items written by the Service Worker (share target) while the app is open.

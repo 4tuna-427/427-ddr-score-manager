@@ -25,6 +25,7 @@ import {
   computeStats,
   rankTitleCandidates,
   bestTitleMatch,
+  validateScorePatch,
   type Extraction,
 } from "../src/lib";
 
@@ -1070,4 +1071,23 @@ test("findRedundantCorrections: only corrections the master has fully caught up 
     [],
   );
   assert.deepEqual(findRedundantCorrections(master, []), []);
+});
+
+test("validateScorePatch accepts valid partial updates and rejects invalid values", () => {
+  assert.equal(validateScorePatch({}), null);
+  assert.equal(validateScorePatch({ score: 995000, ex_score: 1800, level: 17, difficulty: "EXPERT" }), null);
+  assert.equal(validateScorePatch({ ex_score: null, marvelous: 0, rank: "AAA", clear_lamp: null, review_status: "waiting_master" }), null);
+  assert.equal(validateScorePatch({ review_status: null }), null);
+
+  assert.match(validateScorePatch({ score: -1 }) ?? "", /score/);
+  assert.match(validateScorePatch({ score: 1000001 }) ?? "", /score/);
+  assert.match(validateScorePatch({ score: null }) ?? "", /score/);
+  assert.match(validateScorePatch({ score: 99.5 }) ?? "", /score/);
+  assert.match(validateScorePatch({ marvelous: -3 }) ?? "", /marvelous/);
+  assert.match(validateScorePatch({ ok: "8" }) ?? "", /ok/);
+  assert.match(validateScorePatch({ level: 21 }) ?? "", /level/);
+  assert.match(validateScorePatch({ level: 0 }) ?? "", /level/);
+  assert.match(validateScorePatch({ difficulty: "NORMAL" }) ?? "", /difficulty/);
+  assert.match(validateScorePatch({ rank: 123 }) ?? "", /rank/);
+  assert.match(validateScorePatch({ review_status: "done" }) ?? "", /review_status/);
 });
