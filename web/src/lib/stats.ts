@@ -1,5 +1,13 @@
 import type { Score } from './api'
 
+export const LAMP_ORDER: Record<string, number> = {
+  FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6,
+}
+
+export const FLARE_ORDER: Record<string, number> = {
+  I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, EX: 10,
+}
+
 /** EX score rate (% of the chart's maximum EX), 1 decimal. Null when unknown. */
 export function exRatePercent(s: Pick<Score, 'ex_score' | 'chart_max_ex'>): number | null {
   if (s.ex_score == null || !s.chart_max_ex) return null

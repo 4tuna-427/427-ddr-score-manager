@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getCloseCalls, getStats, getTargets, getVersus, type AchievementBucket, type CloseCall, type StatsResponse, type Target, type VersusResponse } from '../lib/api'
 import { useIsDark } from '../lib/theme'
+import { LAMP_ORDER } from '../lib/stats'
 import { DiffBadge } from '../components/DiffBadge'
 import { CoverageMap, JudgeTrendChart, LevelMonthlyChart } from '../components/StatGraphs'
 import { fmtDate } from '../components/ScoreList'
-
-const LAMP_ORDER: Record<string, number> = { FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6 }
 
 /** JST calendar date "YYYY-MM-DD" for an epoch-ms timestamp. */
 function jstDateString(ms: number): string {
@@ -101,7 +100,7 @@ export function StatsPage() {
 
   return (
     <div>
-      <h2>統計・達成状況</h2>
+      <h1>統計・達成状況</h1>
 
       <section className="card">
         <h3>あと少しリスト</h3>
@@ -242,6 +241,7 @@ export function StatsPage() {
             <XAxis dataKey="label" />
             <YAxis allowDecimals={false} />
             <Tooltip contentStyle={dark ? { background: '#171f1a', border: '1px solid #2b3a30', color: '#e8f1ea' } : undefined} />
+            <Legend />
             <Bar dataKey="plays" name="プレイ数" fill="#51dd95" />
             <Bar dataKey="pb_updates" name="自己ベスト更新" fill={dark ? '#c9f7dd' : '#0b7a43'} />
           </BarChart>

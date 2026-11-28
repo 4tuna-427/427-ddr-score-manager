@@ -3,11 +3,11 @@ import { useParams } from 'react-router-dom'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { deleteTarget, getChartHistory, getTarget, saveTarget, type ChartHistory, type Target } from '../lib/api'
 import { useIsDark } from '../lib/theme'
+import { FLARE_ORDER, LAMP_ORDER } from '../lib/stats'
 import { ScoreList, fmtDate } from '../components/ScoreList'
 import { DiffBadge } from '../components/DiffBadge'
 import JacketThumb from '../components/JacketThumb'
 
-const LAMP_ORDER: Record<string, number> = { FAILED: 0, CLEAR: 1, LIFE4: 2, FC: 3, GFC: 4, PFC: 5, MFC: 6 }
 const TARGET_LAMPS = ['', 'CLEAR', 'LIFE4', 'FC', 'GFC', 'PFC', 'MFC']
 
 export function ChartPage() {
@@ -53,11 +53,10 @@ export function ChartPage() {
     if (best == null || (LAMP_ORDER[s.clear_lamp] ?? -1) > (LAMP_ORDER[best] ?? -1)) return s.clear_lamp
     return best
   }, null)
-  const FLARE_ORDER_WEB: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, EX: 10 }
   const bestFlare = items.reduce<string | null>((best, s) => {
     if (!s.flare_rank) return best
     if (s.clear_lamp === 'FAILED') return best
-    if (best == null || (FLARE_ORDER_WEB[s.flare_rank] ?? -1) > (FLARE_ORDER_WEB[best] ?? -1)) return s.flare_rank
+    if (best == null || (FLARE_ORDER[s.flare_rank] ?? -1) > (FLARE_ORDER[best] ?? -1)) return s.flare_rank
     return best
   }, null)
 
@@ -170,7 +169,12 @@ export function ChartPage() {
             <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#2b3a30' : '#d7e2da'} />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-              <YAxis domain={['dataMin - 5000', 1000000]} tick={{ fontSize: 11 }} width={64} />
+              <YAxis
+                domain={[(dataMin: number) => Math.max(0, dataMin - 5000), 1000000]}
+                tickFormatter={(v: number) => v.toLocaleString()}
+                tick={{ fontSize: 11 }}
+                width={64}
+              />
               <Tooltip contentStyle={dark ? { background: '#171f1a', border: '1px solid #2b3a30', color: '#e8f1ea' } : undefined} />
               <Line type="monotone" dataKey="score" name="スコア" stroke={dark ? '#6ddc99' : '#0b7a43'} strokeWidth={2} dot />
             </LineChart>

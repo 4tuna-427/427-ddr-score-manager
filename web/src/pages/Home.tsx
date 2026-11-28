@@ -109,7 +109,7 @@ export function HomePage() {
             {quotaCount > 0 && (
               <p className="warn">本日の無料枠を使い切ったため送信を停止しています。明日以降にアプリを開くと自動で再開します。今すぐ試したい場合は「今すぐ再送」を押してください。</p>
             )}
-            <ul className="queue-list">
+            <ul className="queue-list cap-list">
               {items.map((i) => (
                 <li key={i.id}>
                   <span>{i.name}</span>

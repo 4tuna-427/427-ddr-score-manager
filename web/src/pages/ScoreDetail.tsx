@@ -55,11 +55,12 @@ export function ScoreDetailPage() {
   if (error) return <p className="warn">{error}</p>
   if (!score) return <p className="muted">読み込み中…</p>
 
-  let raw: any = null
+  let raw: { player_1?: { dancer_name?: string | null }; player_2?: { dancer_name?: string | null } } | null = null
   try {
     raw = score.raw_extraction ? JSON.parse(score.raw_extraction) : null
   } catch { /* ignore */ }
   const hasPlayer2 = !!(raw && raw.player_2)
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
   const startEdit = (key: string, value: unknown) => {
     setEditing(key)
@@ -74,8 +75,8 @@ export function ScoreDetailPage() {
       const r = await patchScore(id, { [key]: value })
       setScore(r.score)
       setEditing(null)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errMsg(e))
     } finally {
       setBusy(false)
     }
@@ -87,8 +88,8 @@ export function ScoreDetailPage() {
     try {
       const r = await selectPlayer(id, player)
       setScore(r.score)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errMsg(e))
     } finally {
       setBusy(false)
     }
@@ -101,8 +102,8 @@ export function ScoreDetailPage() {
       const r = await linkChart(id, chartId)
       setScore(r.score)
       setShowRelink(false)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errMsg(e))
     } finally {
       setBusy(false)
     }
@@ -163,7 +164,7 @@ export function ScoreDetailPage() {
         <div className="card">
           <h2>バーサス：プレイヤー切替</h2>
           <p className="muted">
-            1P: {raw.player_1?.dancer_name || '?'} / 2P: {raw.player_2?.dancer_name || '?'}
+            1P: {raw?.player_1?.dancer_name || '?'} / 2P: {raw?.player_2?.dancer_name || '?'}
             （自分のデータとして取り込む側を選んでください）
           </p>
           <div className="row">
@@ -241,9 +242,10 @@ export function ScoreDetailPage() {
             setBusy(true)
             try {
               await deleteScore(id)
-              navigate('/review')
-            } catch (e: any) {
-              setError(e.message)
+              if (window.history.length > 1) navigate(-1)
+              else navigate('/history')
+            } catch (e: unknown) {
+              setError(errMsg(e))
               setBusy(false)
             }
           }}

@@ -121,7 +121,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function rawRequest(path: string, init: RequestInit = {}): Promise<Response> {
   const base = getApiBaseUrl()
   const headers = new Headers(init.headers || {})
   const token = getApiToken()
@@ -135,6 +135,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch { /* keep default */ }
     throw new ApiError(res.status, msg)
   }
+  return res
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await rawRequest(path, init)
   return (await res.json()) as T
 }
 
@@ -184,12 +189,7 @@ export function fetchJacketObjectUrl(songId: string): Promise<string | null> {
 }
 
 export async function fetchExportBlob(): Promise<Blob> {
-  const base = getApiBaseUrl()
-  const headers = new Headers()
-  const token = getApiToken()
-  if (token) headers.set('X-API-Token', token)
-  const res = await fetch(`${base}/api/export`, { headers })
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`)
+  const res = await rawRequest('/api/export')
   return res.blob()
 }
 
@@ -483,21 +483,12 @@ export interface ImportResult {
   error_count: number
 }
 
-export async function importScores(payload: unknown): Promise<ImportResult> {
-  const base = getApiBaseUrl()
-  const headers = new Headers({ 'Content-Type': 'application/json' })
-  const token = getApiToken()
-  if (token) headers.set('X-API-Token', token)
-  const res = await fetch(`${base}/api/import`, { method: 'POST', headers, body: JSON.stringify(payload) })
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`
-    try {
-      const body = await res.json()
-      if (body && body.error) msg = body.error
-    } catch { /* keep default */ }
-    throw new ApiError(res.status, msg)
-  }
-  return (await res.json()) as ImportResult
+export function importScores(payload: unknown): Promise<ImportResult> {
+  return request<ImportResult>('/api/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
 }
 
 export function getChartHistory(chartId: string): Promise<ChartHistory> {
