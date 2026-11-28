@@ -9,6 +9,7 @@ import { ReviewPage } from './pages/Review'
 import { SettingsPage } from './pages/Settings'
 import { BrowsePage } from './pages/Browse'
 import { ScoreDetailPage } from './pages/ScoreDetail'
+import { UploadDock } from './components/UploadDock'
 
 const ChartPage = lazy(() => import('./pages/Chart').then((m) => ({ default: m.ChartPage })))
 const StatsPage = lazy(() => import('./pages/Stats').then((m) => ({ default: m.StatsPage })))
@@ -75,6 +76,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </main>
+        <UploadDock />
         <BottomNav />
       </BrowserRouter>
     </QueueProvider>
