@@ -181,10 +181,99 @@ input[type="file"] { padding: 8px; width: 100%; }
 .judge-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 3px; }
 .judge-pfc { font-weight: 800; color: var(--ink); }
 
-/* Phase 1.3: browse filters */
+/* Phase 1.3: browse filters & redesigned chart cards */
 .browse-filters .filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .browse-filters select { width: 100%; }
 .browse-filters input { width: 100%; }
+
+.browse-filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.browse-filter-toggle {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; min-height: 36px;
+  font-size: 13px; font-weight: 700; border-radius: 8px; background: var(--surface-muted);
+}
+.browse-filter-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--brand); color: var(--brand-ink); font-size: 11px; font-weight: 800;
+}
+.browse-filter-chevron { font-size: 11px; color: var(--muted); }
+.browse-filter-reset {
+  padding: 6px 10px; min-height: 36px; font-size: 12px; font-weight: 700;
+  color: var(--muted); background: transparent;
+}
+
+.browse-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  margin: 10px 0 8px; padding: 8px 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+}
+.browse-total { font-weight: 700; white-space: nowrap; }
+.browse-sort-group { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.browse-sort-group select { min-height: 38px; padding: 6px 10px; font-size: 14px; }
+.browse-sort-group .sort-dir-btn {
+  width: auto; min-height: 38px; padding: 6px 12px; font-size: 13px; white-space: nowrap;
+}
+
+.jacket-thumb-placeholder {
+  display: inline-block; border: 1px dashed var(--line);
+  background: var(--surface-muted);
+}
+
+.browse-card {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(108px, auto);
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  min-height: 76px;
+}
+.browse-card:active { background: var(--surface-active); }
+.browse-card-main {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.browse-card-title {
+  font-weight: 700; font-size: 15px; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.browse-card-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.browse-card-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 12.5px; line-height: 1.3; font-variant-numeric: tabular-nums;
+}
+.browse-card-played {
+  font-size: 12px; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.browse-card-right {
+  display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+  gap: 2px; text-align: right; min-width: 108px;
+}
+.browse-card-score {
+  font-weight: 800; font-size: 16px; line-height: 1.2; font-variant-numeric: tabular-nums;
+}
+.browse-card-rank, .browse-card-sub {
+  font-size: 12px; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.browse-unplayed {
+  display: inline-block; padding: 3px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  background: var(--surface-muted); border: 1px solid var(--line); white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .browse-card {
+    grid-template-columns: 48px minmax(0, 1fr) minmax(96px, auto);
+    gap: 10px; padding: 10px;
+  }
+  .browse-card .jacket-thumb { width: 48px !important; height: 48px !important; }
+  .browse-card-right { min-width: 96px; }
+  .browse-card-score { font-size: 15px; }
+}
 
 /* Level quick buttons on the browse page (main range 16-18 first) */
 .level-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }

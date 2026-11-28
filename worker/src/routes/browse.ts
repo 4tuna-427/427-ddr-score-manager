@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import {
+  bpmSortValue,
   CATEGORY_VERSION_SPELLINGS,
   chartId as makeChartId,
+  extractDdrBpm,
   findPhashCandidates,
   FLARE_ORDER,
   isValidPhash64,
@@ -233,29 +235,60 @@ browseRoutes.get("/api/browse", async (c) => {
     .bind(...binds)
     .first<{ n: number }>();
 
-  const bpmValue =
-    "(CASE WHEN s.bpm LIKE '%-%' THEN CAST(substr(s.bpm, instr(s.bpm, '-') + 1) AS INTEGER) " +
-    "ELSE CAST(s.bpm AS INTEGER) END)";
   const sortDefs: Record<string, { def: "asc" | "desc"; by: (d: string) => string }> = {
     level: { def: "asc", by: (d) => `c.level IS NULL, c.level ${d}, s.title, c.play_style` },
     title: { def: "asc", by: (d) => `s.title ${d}, c.play_style, c.level` },
     notes: { def: "desc", by: (d) => `c.notes IS NULL, c.notes ${d}, s.title` },
-    bpm: { def: "desc", by: (d) => `${bpmValue} IS NULL, ${bpmValue} ${d}, s.title` },
     plays: { def: "desc", by: (d) => `pb.plays IS NULL, pb.plays ${d}, s.title` },
     best: { def: "desc", by: (d) => `pb.best_score IS NULL, pb.best_score ${d}, s.title` },
     recent: { def: "desc", by: (d) => `pb.last_played IS NULL, pb.last_played ${d}, s.title` },
   };
-  const sortDef = sortDefs[sort] ?? sortDefs.level;
-  const orderSql = `ORDER BY ${sortDef.by((dir ?? sortDef.def).toUpperCase())}`;
-  const { results: rows } = await c.env.DB
-    .prepare(
-      `SELECT c.chart_id, c.song_id, c.play_style, c.difficulty, c.level, c.max_ex, c.notes,
+  const baseSelectSql = `SELECT c.chart_id, c.song_id, c.play_style, c.difficulty, c.level, c.max_ex, c.notes,
               s.title, s.artist, s.version, s.bpm, s.has_jacket,
               pb.best_score, pb.plays, pb.last_played
-       ${fromSql} ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
-    )
-    .bind(...binds, limit, offset)
-    .all<Record<string, unknown> & { chart_id: string; best_score: number | null }>();
+       ${fromSql} ${whereSql}`;
+
+  type BrowseDbRow = Record<string, unknown> & {
+    chart_id: string;
+    play_style: string;
+    difficulty: string;
+    title: string;
+    bpm: string | null;
+    best_score: number | null;
+  };
+  let rows: BrowseDbRow[];
+
+  if (sort === "bpm") {
+    const bpmDir = dir ?? "desc";
+    const { results: allRows } = await c.env.DB
+      .prepare(`${baseSelectSql} ORDER BY s.title ASC, c.play_style, c.level`)
+      .bind(...binds)
+      .all<BrowseDbRow>();
+    const withSortBpm = allRows.map((r) => {
+      const cleanBpm = extractDdrBpm(r.bpm, r.difficulty, r.play_style);
+      r.bpm = cleanBpm;
+      return { row: r, val: bpmSortValue(cleanBpm) };
+    });
+    withSortBpm.sort((a, b) => {
+      if (a.val == null && b.val == null) return a.row.title.localeCompare(b.row.title);
+      if (a.val == null) return 1;
+      if (b.val == null) return -1;
+      if (a.val !== b.val) return bpmDir === "asc" ? a.val - b.val : b.val - a.val;
+      return a.row.title.localeCompare(b.row.title);
+    });
+    rows = withSortBpm.slice(offset, offset + limit).map((x) => x.row);
+  } else {
+    const sortDef = sortDefs[sort] ?? sortDefs.level;
+    const orderSql = `ORDER BY ${sortDef.by((dir ?? sortDef.def).toUpperCase())}`;
+    const { results } = await c.env.DB
+      .prepare(`${baseSelectSql} ${orderSql} LIMIT ? OFFSET ?`)
+      .bind(...binds, limit, offset)
+      .all<BrowseDbRow>();
+    rows = results;
+    for (const r of rows) {
+      r.bpm = extractDdrBpm(r.bpm, r.difficulty, r.play_style);
+    }
+  }
 
   const ids = rows.filter((r) => r.best_score != null).map((r) => r.chart_id);
   if (ids.length > 0) {
@@ -313,7 +346,15 @@ browseRoutes.get("/api/charts/:chart_id/history", async (c) => {
     .bind(chartId)
     .first();
   if (!chartRow) return c.json({ error: "chart not found" }, 404);
-  (chartRow as Record<string, unknown>).category = songCategory((chartRow as { version?: string | null }).version);
+  const chartRec = chartRow as Record<string, unknown>;
+  chartRec.category = songCategory((chartRow as { version?: string | null }).version);
+  if ("bpm" in chartRec) {
+    chartRec.bpm = extractDdrBpm(
+      chartRec.bpm as string | null,
+      chartRec.difficulty as string | null,
+      chartRec.play_style as string | null,
+    );
+  }
   const { results } = await c.env.DB
     .prepare("SELECT * FROM scores WHERE chart_id = ? ORDER BY played_at ASC")
     .bind(chartId)

@@ -26,6 +26,8 @@ import {
   rankTitleCandidates,
   bestTitleMatch,
   validateScorePatch,
+  extractDdrBpm,
+  bpmSortValue,
   type Extraction,
 } from "../src/lib";
 
@@ -1090,4 +1092,60 @@ test("validateScorePatch accepts valid partial updates and rejects invalid value
   assert.match(validateScorePatch({ difficulty: "NORMAL" }) ?? "", /difficulty/);
   assert.match(validateScorePatch({ rank: 123 }) ?? "", /rank/);
   assert.match(validateScorePatch({ review_status: "done" }) ?? "", /review_status/);
+});
+
+test("extractDdrBpm handles simple, multi-game, per-difficulty, except, and versioned BPM strings", () => {
+  assert.equal(extractDdrBpm(null, "EXPERT"), null);
+  assert.equal(extractDdrBpm("", "EXPERT"), null);
+  assert.equal(extractDdrBpm("140", "EXPERT"), "140");
+  assert.equal(extractDdrBpm("100-200", "EXPERT"), "100-200");
+  assert.equal(extractDdrBpm("100~200", "EXPERT"), "100-200");
+
+  // Multi-game explicit DDR
+  assert.equal(extractDdrBpm("123-135 (beatmania IIDX), 110-135 (DanceDanceRevolution)", "EXPERT"), "110-135");
+  assert.equal(extractDdrBpm("82-163 (DanceDanceRevolution), 163 (SOUND VOLTEX)", "CHALLENGE"), "82-163");
+
+  // Catch-all "other BEMANI games" / "all BEMANI games except"
+  assert.equal(extractDdrBpm("100 (DANCERUSH), 200 (other BEMANI games)", "EXPERT"), "200");
+  assert.equal(extractDdrBpm("110 (all BEMANI games except SOUND VOLTEX), 220 (SOUND VOLTEX)", "EXPERT"), "110");
+  assert.equal(extractDdrBpm("116-146 (all games except DanceDanceRevolution), 146 (DanceDanceRevolution)", "EXPERT"), "146");
+
+  // Per-difficulty DDR-only
+  const ace = "200 (BEGINNER, BASIC), 100-200 (DIFFICULT), 50-800 (EXPERT), 50-400 (CHALLENGE)";
+  assert.equal(extractDdrBpm(ace, "BEGINNER"), "200");
+  assert.equal(extractDdrBpm(ace, "BASIC"), "200");
+  assert.equal(extractDdrBpm(ace, "DIFFICULT"), "100-200");
+  assert.equal(extractDdrBpm(ace, "EXPERT"), "50-800");
+  assert.equal(extractDdrBpm(ace, "CHALLENGE"), "50-400");
+
+  // "all ... difficulties except ..." and ranges ("BEGINNER to EXPERT")
+  const exceptBeg = "154 (beatmania IIDX, DanceDanceRevolution BEGINNER, DANCERUSH, pop'n music), 150-155 (all DanceDanceRevolution difficulties except BEGINNER)";
+  assert.equal(extractDdrBpm(exceptBeg, "BEGINNER"), "154");
+  assert.equal(extractDdrBpm(exceptBeg, "EXPERT"), "150-155");
+
+  const rangeDiff = "90-190 (beatmania IIDX, DanceDanceRevolution BEGINNER to EXPERT), 90-360 (DanceDanceRevolution CHALLENGE)";
+  assert.equal(extractDdrBpm(rangeDiff, "DIFFICULT"), "90-190");
+  assert.equal(extractDdrBpm(rangeDiff, "CHALLENGE"), "90-360");
+
+  // Version hints: Present beats ULTRAMIX4 / HOTTEST PARTY
+  assert.equal(
+    extractDdrBpm("110 (DanceDanceRevolution A&rarr;Present, GF/DM, REFLEC BEAT, ノスタルジア), 220 (DanceDanceRevolution ULTRAMIX4, pop'n music)", "EXPERT"),
+    "110",
+  );
+  assert.equal(
+    extractDdrBpm("90-180 (DanceDanceRevolution / Dancing Stage HOTTEST PARTY), 180 (DanceDanceRevolution A3&rarr;Present)", "EXPERT"),
+    "180",
+  );
+
+  // Style-specific Double DIFFICULT vs other DanceDanceRevolution charts
+  const doubleDiff = "83-148 (beatmania IIDX, other DanceDanceRevolution charts), 148 (DanceDanceRevolution Double DIFFICULT)";
+  assert.equal(extractDdrBpm(doubleDiff, "DIFFICULT", "SP"), "83-148");
+  assert.equal(extractDdrBpm(doubleDiff, "DIFFICULT", "DP"), "148");
+});
+
+test("bpmSortValue extracts numeric upper bound for sorting", () => {
+  assert.equal(bpmSortValue("140"), 140);
+  assert.equal(bpmSortValue("50-800"), 800);
+  assert.equal(bpmSortValue("110-135"), 135);
+  assert.equal(bpmSortValue(null), null);
 });

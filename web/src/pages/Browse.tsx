@@ -17,8 +17,8 @@ interface BrowseListCache {
   total: number
 }
 
-/** One-tap level shortcuts: the user's main range (16-18) first. */
-const QUICK_LEVELS = [16, 17, 18, 15, 19]
+/** One-tap level shortcuts ordered ascending. */
+const QUICK_LEVELS = [15, 16, 17, 18, 19]
 
 /**
  * Browse filters persist across visits (localStorage). First visit defaults
@@ -74,6 +74,16 @@ export function BrowsePage() {
   const [played, setPlayed] = useState(saved.played)
   const [sort, setSort] = useState(saved.sort)
   const [dir, setDir] = useState<'asc' | 'desc'>(saved.dir === 'desc' ? 'desc' : 'asc')
+  const [showFilters, setShowFilters] = useState(false)
+
+  const activeDetailCount = [style, difficulty, version, category, played].filter(Boolean).length
+  const resetDetailFilters = () => {
+    setStyle('')
+    setDifficulty('')
+    setVersion('')
+    setCategory('')
+    setPlayed('')
+  }
 
   useEffect(() => {
     try {
@@ -198,36 +208,61 @@ export function BrowsePage() {
             すべて
           </button>
         </div>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="曲名・アーティストで検索" />
-        <div className="filter-grid">
-          <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label="スタイル">
-            <option value="">SP/DP すべて</option>
-            <option value="SP">SP</option>
-            <option value="DP">DP</option>
-          </select>
-          <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} aria-label="難易度">
-            <option value="">難易度すべて</option>
-            {DIFFS.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <select value={level} onChange={(e) => setLevel(e.target.value)} aria-label="レベル">
-            <option value="">レベルすべて</option>
-            {Array.from({ length: 19 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>Lv.{n}</option>)}
-          </select>
-          <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="バージョン">
-            <option value="">バージョンすべて</option>
-            {versions.map((v) => <option key={v} value={v}>{v}</option>)}
-          </select>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="カテゴリ">
-            <option value="">カテゴリすべて</option>
-            <option value="CLASSIC">CLASSIC（〜X3）</option>
-            <option value="WHITE">WHITE（2013〜A）</option>
-            <option value="GOLD">GOLD（A20〜）</option>
-          </select>
-          <select value={played} onChange={(e) => setPlayed(e.target.value)} aria-label="プレイ状況">
-            <option value="">プレイ状況すべて</option>
-            <option value="played">プレイ済み</option>
-            <option value="unplayed">未プレイ</option>
-          </select>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="曲名で検索" />
+        <div className="browse-filter-bar">
+          <button
+            type="button"
+            className="browse-filter-toggle"
+            aria-expanded={showFilters}
+            onClick={() => setShowFilters((v) => !v)}
+          >
+            <span>詳細フィルタ</span>
+            {activeDetailCount > 0 && <span className="browse-filter-count">{activeDetailCount}</span>}
+            <span className="browse-filter-chevron" aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
+          </button>
+          {activeDetailCount > 0 && (
+            <button type="button" className="browse-filter-reset" onClick={resetDetailFilters}>
+              リセット
+            </button>
+          )}
+        </div>
+        {showFilters && (
+          <div className="filter-grid">
+            <select value={style} onChange={(e) => setStyle(e.target.value)} aria-label="スタイル">
+              <option value="">SP/DP すべて</option>
+              <option value="SP">SP</option>
+              <option value="DP">DP</option>
+            </select>
+            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} aria-label="難易度">
+              <option value="">難易度すべて</option>
+              {DIFFS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <select value={level} onChange={(e) => setLevel(e.target.value)} aria-label="レベル">
+              <option value="">レベルすべて</option>
+              {Array.from({ length: 19 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>Lv.{n}</option>)}
+            </select>
+            <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="バージョン">
+              <option value="">バージョンすべて</option>
+              {versions.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="カテゴリ">
+              <option value="">カテゴリすべて</option>
+              <option value="CLASSIC">CLASSIC（〜X3）</option>
+              <option value="WHITE">WHITE（2013〜A）</option>
+              <option value="GOLD">GOLD（A20〜）</option>
+            </select>
+            <select value={played} onChange={(e) => setPlayed(e.target.value)} aria-label="プレイ状況">
+              <option value="">プレイ状況すべて</option>
+              <option value="played">プレイ済み</option>
+              <option value="unplayed">未プレイ</option>
+            </select>
+          </div>
+        )}
+      </div>
+
+      <div className="browse-toolbar">
+        <span className="muted browse-total">{total.toLocaleString()}譜面{loading && ' 読み込み中…'}</span>
+        <div className="browse-sort-group">
           <select value={sort} onChange={(e) => changeSort(e.target.value)} aria-label="並び順">
             <option value="level">レベル順</option>
             <option value="title">曲名順</option>
@@ -249,35 +284,45 @@ export function BrowsePage() {
       </div>
 
       {error && <p className="warn">{error}</p>}
-      <p className="muted">{total.toLocaleString()}譜面{loading && ' 読み込み中…'}</p>
       <ul className="score-list">
         {items.map((it) => {
           const rate = it.best_ex_score != null ? exRatePercent({ ex_score: it.best_ex_score, chart_max_ex: it.max_ex }) : null
+          const rankLamp = [it.best_rank, it.best_lamp].filter(Boolean).join(' / ')
+          const exFlare = [
+            rate != null ? `EX ${rate}%` : '',
+            it.best_flare_rank ? `フレア ${it.best_flare_rank}` : '',
+          ].filter(Boolean).join(' ・ ')
           return (
             <li key={it.chart_id}>
-              <Link to={`/charts/${encodeURIComponent(it.chart_id)}`} className="score-row">
-                <JacketThumb songId={it.song_id} hasJacket={it.has_jacket} />
-                <div className="score-row-main">
-                  <span className="score-row-title">{it.title}</span>
-                  <span className="muted">
-                    {it.category && <span className={`badge cat-${it.category.toLowerCase()}`}>{it.category}</span>}{' '}
-                    {it.artist || ''} ・ <DiffBadge style={it.play_style} difficulty={it.difficulty} level={it.level} />
-                    {it.notes ? ` ・ ${it.notes}ノーツ` : ''}{it.bpm ? ` ・ BPM ${it.bpm}` : ''}{it.version ? ` ・ ${it.version}` : ''}
-                  </span>
+              <Link to={`/charts/${encodeURIComponent(it.chart_id)}`} className="browse-card">
+                <JacketThumb songId={it.song_id} hasJacket={it.has_jacket} size={52} placeholder />
+                <div className="browse-card-main">
+                  <span className="browse-card-title" title={it.title}>{it.title}</span>
+                  <div className="browse-card-badges">
+                    <DiffBadge style={it.play_style} difficulty={it.difficulty} level={it.level} />
+                    {it.category && <span className={`badge cat-${it.category.toLowerCase()}`}>{it.category}</span>}
+                  </div>
+                  {(it.notes != null || it.bpm) && (
+                    <div className="browse-card-meta muted">
+                      {it.notes != null && <span>{it.notes.toLocaleString()}ノーツ</span>}
+                      {it.bpm && <span>BPM {it.bpm}</span>}
+                    </div>
+                  )}
                   {it.plays != null && it.last_played != null && (
-                    <span className="muted">{it.plays}プレイ ・ 最終 {fmtDate(it.last_played)}</span>
+                    <div className="browse-card-played muted">
+                      {it.plays}プレイ ・ 最終 {fmtDate(it.last_played)}
+                    </div>
                   )}
                 </div>
-                <div className="score-row-right">
+                <div className="browse-card-right">
                   {it.best_score != null ? (
                     <>
-                      <span className="score-row-score">{it.best_score.toLocaleString()}</span>
-                      <span className="muted">
-                        {it.best_rank || ''}{it.best_lamp ? ` / ${it.best_lamp}` : ''}{rate != null ? ` ・ EXスコア ${rate}%` : ''}{it.best_flare_rank ? ` ・ フレア ${it.best_flare_rank}` : ''}
-                      </span>
+                      <span className="browse-card-score">{it.best_score.toLocaleString()}</span>
+                      {rankLamp && <span className="browse-card-rank muted">{rankLamp}</span>}
+                      {exFlare && <span className="browse-card-sub muted">{exFlare}</span>}
                     </>
                   ) : (
-                    <span className="muted">未プレイ</span>
+                    <span className="browse-unplayed">未プレイ</span>
                   )}
                 </div>
               </Link>

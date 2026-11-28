@@ -4,3 +4,4 @@ export * from "./lib/title";
 export * from "./lib/validation";
 export * from "./lib/master";
 export * from "./lib/stats";
+export * from "./lib/bpm";
